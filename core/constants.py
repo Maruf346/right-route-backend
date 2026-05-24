@@ -19,6 +19,16 @@ class TeamMemberStatus(models.TextChoices):
     REMOVED = "REMOVED"
     SUSPENDED = "SUSPENDED"
 
+class TeamMemberRole(models.TextChoices):
+    # MEMBER = "MEMBER"
+    # MANAGER = "MANAGER"
+    OWNER = "OWNER"
+    ADMIN = "ADMIN"
+    MANAGER = "MANAGER"
+    DISPATCHER = "DISPATCHER"
+    DRIVER = "DRIVER"
+    VIEWER = "VIEWER"
+
 class PaymentMethodType(models.TextChoices):
     CARD = "CARD"
     BANK = "BANK"
@@ -37,8 +47,10 @@ class UserSubscriptionStatus(models.TextChoices):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     EXPIRED = "EXPIRED"
-    REFUND = "REFUND"
-    CANCEL = "CANCEL"
+    CANCELLED = "CANCELLED"
+    PAST_DUE = "PAST_DUE"
+    FAILED = "FAILED"
+    TRIAL = "TRIAL"
 
 class PaymentStatus(models.TextChoices):
     PENDING = "PENDING"
@@ -72,8 +84,12 @@ class WaypointType(models.TextChoices):
     CHECKPOINT = "CHECKPOINT"
 
 # Notification APP---
-class NotifyType(models.TextChoices):
+class NotifyLogAction(models.TextChoices):
     GET = "GET"
     CREATE = "CREATE"
     UPDATE = "UPDATE"
     DELETE = "DELETE"
+
+class LogStatus(models.TextChoices):
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"

@@ -13,18 +13,28 @@ class Route(BaseModel):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     route_status = models.CharField(max_length=20, choices=RouteStatus.choices, default=RouteStatus.DRAFT)
-    ai_processing_status = models.CharField(max_length=20, choices=RouteStatus.choices, default=AIProcessingStatus.PENDING)
+    ai_processing_status = models.CharField(max_length=20, choices=AIProcessingStatus.choices, default=AIProcessingStatus.PENDING)
 
     total_distance_km = models.FloatField(default=0)
     estimated_duration = models.PositiveIntegerField(default=0)
 
     total_waypoints = models.PositiveIntegerField(default=0)
     # route_geometry = gis_moelds.LineStringField(null=True, blank=True)
-    merged_route_json = models.JSONField(default=dict)
 
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    
+    route_progress_percentage = models.CharField(max_length=255, blank=True, null=True)
+    current_waypoint_index = models.CharField(max_length=255, blank=True, null=True)
+    is_rerouted = models.CharField(max_length=255, blank=True, null=True)
+    reroute_count = models.CharField(max_length=255, blank=True, null=True)
+    route_health_score = models.CharField(max_length=255, blank=True, null=True)
+    risk_score = models.CharField(max_length=255, blank=True, null=True)
+    compliance_score = models.CharField(max_length=255, blank=True, null=True)
+    ai_summary = models.CharField(max_length=255, blank=True, null=True)
+    incident_detected = models.CharField(max_length=255, blank=True, null=True)
+    last_tracking_received_at = models.DateTimeField()
 
     class Meta:
         indexes = [
@@ -55,6 +65,12 @@ class RoutePermit(BaseModel):
     ai_response_json = models.JSONField(default=dict)
     processing_status = models.CharField(max_length=20, choices=PermitProcessingStatus.choices, default=PermitProcessingStatus.PENDING)
     
+    
+    processing_started_at = models.DateTimeField()
+    processing_completed_at = models.DateTimeField()
+    processing_error = models.JSONField(default=dict)
+    confidence_score = models.CharField(max_length=20, default=50)
+    
     class Meta:
         ordering = ['route', 'index']
         unique_together = [['route', 'index']]
@@ -84,7 +100,7 @@ class PermitWaypoint(BaseModel):
         ]
     
     def __str__(self):
-        return f"{self.permit.name} - {self.order}. {self.name}"
+        return f"{self.permit.name} - {self.index}. {self.name}"
 
 
 
