@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models
 from core.common_models import BaseModel
 from core.constants import BillingType, PlanType, UserSubscriptionStatus, PaymentStatus
-from account.models import UserPaymentMethod, User
+from account.models import UserPaymentMethod, User, Team
 
 class SubscriptionPlan(BaseModel):
     name = models.CharField(max_length=255)
@@ -17,6 +17,7 @@ class SubscriptionPlan(BaseModel):
 
 class UserSubscription(BaseModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="subscriptions")
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="subscriptions")
     plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT, related_name="subscriptions")
 
     status = models.CharField(max_length=30, choices=UserSubscriptionStatus.choices, default=UserSubscriptionStatus.PENDING)

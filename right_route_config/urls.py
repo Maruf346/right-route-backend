@@ -20,13 +20,22 @@ def Home(request):
         "server_time": now(),
         "message": "Backend server is running successfully."
     })
-    
+
+def api_endpoint(request):
+    return JsonResponse(
+        {
+            "application": "API V1 Endpoint!",
+            "status": "online 🚀",
+            "server_time": now(),
+        }
+    )
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("", Home, name="WelcomeAPI"),
     
     # app urls include
+    path("api/v1/", api_endpoint, name="api_endpoint"),
     path("api/v1/", include("account.urls")),
     path("api/v1/", include("core.urls")),
     path("api/v1/", include("notification.urls")),

@@ -20,7 +20,7 @@ class TeamMemberStatus(models.TextChoices):
     SUSPENDED = "SUSPENDED"
 
 class TeamMemberRole(models.TextChoices):
-    # MEMBER = "MEMBER"
+    MEMBER = "MEMBER"
     # MANAGER = "MANAGER"
     OWNER = "OWNER"
     ADMIN = "ADMIN"

@@ -7,37 +7,12 @@ from django.db import transaction
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.utils.translation import gettext_lazy as _
 import random
-from core.utils import ImageDeleteOS, UsernameGenerate
 
 
 class User(BaseModel, AbstractBaseUser, PermissionsMixin):
-    username_validator = UnicodeUsernameValidator()
-    username = models.CharField(
-        _("username"),
-        max_length=150,
-        unique=True,
-        help_text=_(
-            "Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only."
-        ),
-        validators=[username_validator],
-        error_messages={
-            "unique": _("A user with that username already exists."),
-        },
-    )
-    first_name = models.CharField(max_length=100, blank=True)
-    last_name = models.CharField(max_length=100, blank=True)
-    phone = models.CharField(max_length=20, unique=True)
     email = models.EmailField(max_length=255, unique=True, db_index=True)
-    profile_image = models.ImageField(
-        upload_to="profiles/",
-        null=True,
-        blank=True
-    )
-
     user_type = models.CharField(max_length=20, choices=UserType.choices, default=UserType.MAIN_USER,)
     status = models.CharField( max_length=20, choices=UserStatus.choices, default=UserStatus.ACTIVE,)
-
-    is_phone_verified = models.BooleanField(default=False)
     is_email_verified = models.BooleanField(default=False)
 
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)
@@ -48,36 +23,10 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
     
     EMAIL_FIELD = "email"
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["username"]
 
     objects = UserManager()
     
-    @property
-    def full_name(self):
-        return (
-            f"{self.first_name or ''} {self.last_name or ''}"
-        ).strip()
-    
-    def image_update(self, instance):
-        image_delete = ImageDeleteOS(instance.profile_image)
-        image_delete.previous_image(self.profile_image)
-    
-    def delete(self, *args, **kwargs):
-        image_delete = ImageDeleteOS(self.profile_image)
-        image_delete.instance_delete()
-        return super().delete(*args, **kwargs)
-
-    def generate_username(self):
-        username = UsernameGenerate(self.first_name, self.last_name, self.email, self.phone)
-        return username
-    
     def save(self, *args, **kwargs):
-        if self.pk and self.profile_image and User.objects.filter(pk=self.pk).exists():
-            instance = User.objects.get(pk=self.pk)
-            self.image_update(instance)
-        
-        if not self.username: self.username = self.generate_username()
-        # if not self.referral_code: self.referral_code = self.generate_referral_code()
         return super().save(*args, **kwargs)
 
     class Meta:
@@ -94,9 +43,12 @@ class OTPVerification(BaseModel):
     otp_code = models.CharField(max_length=10)
     purpose = models.CharField(max_length=20, choices=OTPPurpose.choices)
     is_verified = models.BooleanField(default=False)
-
-    expires_at = models.DateTimeField()
     verified_at = models.DateTimeField(null=True, blank=True)
+    
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return (timezone.now() - self.created_at).seconds > 300
 
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     device_info = models.TextField(blank=True, null=True)
@@ -112,7 +64,7 @@ class OTPVerification(BaseModel):
 
 class Team(BaseModel):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="owned_teams")
-    subscription = models.OneToOneField("subscription.UserSubscription", on_delete=models.SET_NULL, related_name="team", blank=True, null=True)
+    # subscription = models.OneToOneField("subscription.UserSubscription", on_delete=models.SET_NULL, related_name="team", blank=True, null=True)
     name = models.CharField(max_length=255)
     max_members = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
