@@ -63,7 +63,7 @@ class OTPVerification(BaseModel):
         return f"{self.otp_code} OTP for {self.user.email}"
 
 class Team(BaseModel):
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="owned_teams")
+    owner = models.OneToOneField(User, on_delete=models.CASCADE, related_name="owned_team")
     # subscription = models.OneToOneField("subscription.UserSubscription", on_delete=models.SET_NULL, related_name="team", blank=True, null=True)
     name = models.CharField(max_length=255)
     max_members = models.PositiveIntegerField(default=0)

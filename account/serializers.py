@@ -32,12 +32,10 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Invalid credentials."
             )
-
         if not user.is_active:
             raise serializers.ValidationError(
                 "Account disabled."
             )
-
         attrs["user"] = user
         return attrs
 
@@ -47,16 +45,9 @@ class LoginSerializer(serializers.Serializer):
             user=self.validated_data["user"],
             otp_code=otp_code,
             purpose=OTPPurpose.LOGIN,
-            # expires_at=(
-            #     timezone.now()
-            #     + timezone.timedelta(
-            #         minutes=5
-            #     )
-            # )
         )
         
         # send otp email here
-        
         return True
 
 class CreatePasswordSerializer(serializers.Serializer):
@@ -138,3 +129,17 @@ class VerifyOTPSerializer(serializers.Serializer):
         refresh = RefreshToken.for_user(user)
         return refresh
 
+class ChangePasswordSerializer(serializers.Serializer):
+    new_password = serializers.CharField(write_only=True, min_length=6)
+
+    def validate_new_password(self, value):
+        validate_password(value)
+        return value
+
+    def change_password(self, request):
+        new_password = self.validated_data["new_password"]
+        user = request.user
+        user.plain_password = new_password
+        user.set_password(new_password)
+        user.save()
+        return user

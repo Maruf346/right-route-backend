@@ -1,106 +1,80 @@
 from django.contrib.auth import logout
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.request import Request
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 from account.models import User
 from rest_framework.exceptions import ValidationError
+from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from .serializers import (
     ContinueSerializer,
     LoginSerializer,
     CreatePasswordSerializer,
-    VerifyOTPSerializer,
+    VerifyOTPSerializer, ChangePasswordSerializer
 )
+from .utils import OwnAPIView
 
 
-class ContinueAPIView(APIView):
+class ContinueAPIView(OwnAPIView):
+    serializer_class = ContinueSerializer
     permission_classes = []
-
-    def post(self, request):
-        serializer = ContinueSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+    
+    def success_response(self, serializer):  
         email = serializer.validated_data["email"]
         user_exists = User.objects.filter(
             email=email
-        ).exists()
+        ).exists()   
         return Response(
             {
                 "success": True,
                 "email": email,
                 "is_registered": user_exists,
-                "next_step": (
-                    "LOGIN_PASSWORD"
-                    if user_exists
-                    else "CREATE_PASSWORD"
+                "next_step": ( "LOGIN_PASSWORD" if user_exists else "CREATE_PASSWORD"
                 )
             }
         )
 
-
-class LoginAPIView(APIView):
+class LoginAPIView(OwnAPIView):
+    serializer_class = LoginSerializer
     permission_classes = []
-
-    def post(self, request):
-        serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)        
+    
+    def success_response(self, serializer):
         serializer.send_login_otp()
         return Response(
             {
                 "success": True,
-                "message": "OTP sent successfully.",
+                "detail": "OTP sent successfully.",
                 "next_step": "VERIFY_OTP"
             }
         )
 
-
-class CreatePasswordAPIView(APIView):
+class CreatePasswordAPIView(OwnAPIView):
+    serializer_class = CreatePasswordSerializer
     permission_classes = []
-
-    def post(self, request):
-        serializer = (CreatePasswordSerializer(data=request.data))
-        serializer.is_valid(raise_exception=True)
+    
+    def success_response(self, serializer):
         serializer.create_user()
-        # email = serializer.validated_data["email"]
-        # password = (serializer.validated_data["password"])
-
-        # user = User.objects.create_user(
-        #     email=email,
-        #     password=password,
-        # )
-
-        # otp_code = "123456"
-
-        # OTPVerification.objects.create(
-        #     user=user,
-        #     otp_code=otp_code,
-        #     purpose=(
-        #         OTPPurpose.REGISTER
-        #     )
-        # )
-
-        # send otp email here
-
         return Response(
             {
                 "success": True,
-                "message":
-                "Account created successfully.",
-                "next_step":
-                "VERIFY_OTP"
+                "detail": "Account created successfully.",
+                "next_step": "VERIFY_OTP"
             },
             status=status.HTTP_201_CREATED
         )
 
-
-class VerifyOTPAPIView(APIView):
+class VerifyOTPAPIView(OwnAPIView):
+    serializer_class = VerifyOTPSerializer
     permission_classes = []
     
-    def get_success_response(self, serializer, token):
+    def success_response(self, serializer):
+        token = serializer.get_token(self.request)
         return Response(
             {
                 "success": True,
-                "message": "Authentication successful.",
+                "detail": "Authentication successful.",
                 "data": {
                     "access": str(token.access_token),
                     "refresh": str(token),
@@ -112,21 +86,6 @@ class VerifyOTPAPIView(APIView):
             }
         )
 
-    def post(self, request):
-        try:
-            serializer = VerifyOTPSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            token = serializer.get_token(request)
-            return self.get_success_response(serializer, token)
-        except Exception as e:
-            return Response(
-                {
-                    "success": False,
-                    "message": str(e)
-                }
-            )
-
-
 class LogoutAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -135,13 +94,36 @@ class LogoutAPIView(APIView):
         return Response(
             {
                 "success": True,
-                "message": "Logout successful."
+                "detail": "Logout successful."
             }
         )
 
 
 class RefreshTokenAPIView(TokenRefreshView):
-    pass
+    def post(self, request: Request, *args, **kwargs) -> Response:
+        serializer = self.get_serializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+            return Response(
+                {
+                    "success": True,
+                    "data": serializer.validated_data
+                }, status=status.HTTP_200_OK
+            )
+        except TokenError as e:
+            return Response(
+                {
+                    "success": False,
+                    "detail": str(e)
+                }, status=status.HTTP_401_UNAUTHORIZED
+            )
+        except Exception as e:
+            return Response(
+                {
+                    "success": False,
+                    "detail": str(e)
+                }, status=status.HTTP_400_BAD_REQUEST
+            )
 
 class VerifyTokenAPIView(TokenVerifyView):
     def post(self, request, *args, **kwargs) -> Response:
@@ -150,22 +132,39 @@ class VerifyTokenAPIView(TokenVerifyView):
             serializer.is_valid(raise_exception=True)
             return Response(
                 {
-                    "status": False,
-                    "message": "Token Valid!"
+                    "success": True,
+                    "detail": "Token Valid!"
                 }, status=status.HTTP_200_OK
             )
         except ValidationError:
             error = {key: str(value[0]) for key, value in serializer.errors.items()}
             return Response(
                 {
-                    "status": False,
-                    "message": error
+                    "success": False,
+                    "detail": error
                 }, status=status.HTTP_400_BAD_REQUEST
             )
         except Exception as e:
             return Response(
                 {
-                    "status": False,
-                    "message": str(e)
+                    "success": False,
+                    "detail": str(e)
                 }, status=status.HTTP_400_BAD_REQUEST
             )
+
+
+class ChangePasswordView(OwnAPIView):
+    serializer_class = ChangePasswordSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def success_response(self, serializer):
+        user = serializer.change_password(self.request)
+        return Response(
+            {
+                "success": True,
+                "message": "Password changed successfully",
+                "mail": user.email if user else None
+            }, status=status.HTTP_200_OK
+        )
+
+

@@ -1,5 +1,7 @@
 from django.urls import path
-
+from .admin_views import (
+    AdminLoginView
+)
 from .views import (
     ContinueAPIView,
     LoginAPIView,
@@ -7,7 +9,7 @@ from .views import (
     VerifyOTPAPIView,
     RefreshTokenAPIView,
     LogoutAPIView,
-    VerifyTokenAPIView
+    VerifyTokenAPIView, ChangePasswordView
 )
 
 urlpatterns = [
@@ -18,4 +20,8 @@ urlpatterns = [
     path("auth/refresh-token/",RefreshTokenAPIView.as_view(),name="refresh-token"),
     path("auth/verify-token/",VerifyTokenAPIView.as_view(),name="verify-token"),
     path("auth/logout/",LogoutAPIView.as_view(),name="logout"),
+    path("auth/change-password/",ChangePasswordView.as_view(),name="change-password"),
+    
+    
+    path("auth/admin/login/",AdminLoginView.as_view(),name="admin-login"),
 ]
