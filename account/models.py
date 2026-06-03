@@ -2,7 +2,7 @@ from django.db import models
 from core.common_models import BaseModel
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from .managers import UserManager
-from core.constants import UserStatus, UserType, OTPPurpose, TeamMemberStatus, PaymentMethodType, TeamMemberRole
+from core.constants import UserStatus, UserType, OTPPurpose, TeamMemberStatus, PaymentMethodType
 from django.db import transaction
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.utils.translation import gettext_lazy as _
@@ -64,7 +64,6 @@ class OTPVerification(BaseModel):
 
 class Team(BaseModel):
     owner = models.OneToOneField(User, on_delete=models.CASCADE, related_name="owned_team")
-    # subscription = models.OneToOneField("subscription.UserSubscription", on_delete=models.SET_NULL, related_name="team", blank=True, null=True)
     name = models.CharField(max_length=255)
     max_members = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -79,7 +78,6 @@ class Team(BaseModel):
 class TeamMember(BaseModel):
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="members")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="team_memberships")
-    role = models.CharField(max_length=20, choices=TeamMemberRole.choices, default=TeamMemberRole.MEMBER)
     status = models.CharField(max_length=20, choices=TeamMemberStatus.choices, default=TeamMemberStatus.ACTIVE)
     joined_at = models.DateTimeField(auto_now_add=True)
 

@@ -19,16 +19,6 @@ class TeamMemberStatus(models.TextChoices):
     REMOVED = "REMOVED"
     SUSPENDED = "SUSPENDED"
 
-class TeamMemberRole(models.TextChoices):
-    MEMBER = "MEMBER"
-    # MANAGER = "MANAGER"
-    OWNER = "OWNER"
-    ADMIN = "ADMIN"
-    MANAGER = "MANAGER"
-    DISPATCHER = "DISPATCHER"
-    DRIVER = "DRIVER"
-    VIEWER = "VIEWER"
-
 class PaymentMethodType(models.TextChoices):
     CARD = "CARD"
     BANK = "BANK"
@@ -51,8 +41,15 @@ class UserSubscriptionStatus(models.TextChoices):
     PAST_DUE = "PAST_DUE"
     FAILED = "FAILED"
     TRIAL = "TRIAL"
+    GRACE_PERIOD = "GRACE_PERIOD"
 
 class PaymentStatus(models.TextChoices):
+    PENDING = "PENDING"
+    PAID = "PAID"
+    REFUND_PROCESSING = "REFUND_PROCESSING"
+    REFUNDED = "REFUNDED"
+
+class PaymentTransactionStatus(models.TextChoices):
     PENDING = "PENDING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"

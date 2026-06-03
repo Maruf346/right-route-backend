@@ -7,6 +7,8 @@ from django.http import JsonResponse
 from django.utils.timezone import now
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
+from subscription.views import SubscriptionPlanPayActionView
+
 # Administrator Dashboard Customized---
 admin.site.site_title = "HomeWorkerFinder"
 admin.site.site_header = "HomeWorkerFinder"
@@ -33,6 +35,9 @@ def api_endpoint(request):
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("", Home, name="WelcomeAPI"),
+    
+    # Payment Action API
+    path("purchase/pay/for/subscription/", SubscriptionPlanPayActionView.as_view(), name="payment-action-api"),
     
     # app urls include
     path("api/v1/", api_endpoint, name="api_endpoint"),

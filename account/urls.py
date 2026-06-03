@@ -1,4 +1,5 @@
-from django.urls import path
+from django.urls import path, re_path, include
+from rest_framework.routers import DefaultRouter
 from .admin_views import (
     AdminLoginView
 )
@@ -11,6 +12,11 @@ from .views import (
     LogoutAPIView,
     VerifyTokenAPIView, ChangePasswordView
 )
+from .team_views import TeamViewSet
+
+router = DefaultRouter()
+router.register(r"team", TeamViewSet, basename="team")
+
 
 urlpatterns = [
     path("auth/continue/",ContinueAPIView.as_view(),name="continue"),
@@ -24,4 +30,9 @@ urlpatterns = [
     
     
     path("auth/admin/login/",AdminLoginView.as_view(),name="admin-login"),
+    
+    # TeamViewSet
+    
 ]
+urlpatterns = router.urls
+
