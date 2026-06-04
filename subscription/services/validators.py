@@ -68,7 +68,6 @@ class SubscriptionValidator:
 
 
 class TeamMemberValidator:
-
     @staticmethod
     def get_valid_subscription(team, owner):
         now = timezone.now()
@@ -112,10 +111,14 @@ class TeamMemberValidator:
             )
 
         # Team plan required
-        print("subscription.team: ", subscription.team)
-        if subscription.plan.plan_type != PlanType.TEAM or subscription.team or subscription.team != team:
+        if subscription.plan.plan_type != PlanType.TEAM:
             raise ValidationError(
-                "Current subscription does not support team members."
+                "This subscription is not a TEAM plan."
+            )
+
+        if subscription.team_id != team.id:
+            raise ValidationError(
+                "This subscription does not belong to your team."
             )
 
         # Team limit validation
@@ -129,6 +132,14 @@ class TeamMemberValidator:
                 f"Maximum allowed: {subscription.plan.team_limit}"
             )
 
+        # Already member?
+        if TeamMember.objects.filter(
+            team=team,
+            user=target_user
+        ).exists():
+            raise ValidationError(
+                "User is already a member of this team."
+            )
         
         membership = (
             TeamMember.objects
@@ -143,14 +154,79 @@ class TeamMemberValidator:
             raise ValidationError(
                 "User already belongs to another team."
             )
-        
-        # Already member?
-        if TeamMember.objects.filter(
-            team=team,
-            user=target_user
-        ).exists():
-            raise ValidationError(
-                "User is already a member of this team."
-            )
         return True
+
+
+
+class RouteAccessValidator:
+    @staticmethod
+    def get_valid_subscription(user):
+        now = timezone.now()
+        return (
+            UserSubscription.objects
+            .select_related("plan", "team")
+            .filter(user=user)
+            .filter(
+                Q(
+                    status__in=[
+                        UserSubscriptionStatus.ACTIVE,
+                        UserSubscriptionStatus.TRIAL,
+                    ],
+                    expires_at__gt=now
+                )
+                |
+                Q(
+                    status=UserSubscriptionStatus.GRACE_PERIOD,
+                    grace_period_until__gt=now
+                )
+            )
+            .first()
+        )
+
+    @classmethod
+    def validate_route_creation(cls, user):
+        my_subscription = cls.get_valid_subscription(user)
+        if my_subscription:
+            return True, {
+                "access_type": "self",
+                "team": None,
+                "subscription": my_subscription
+            }
+
+        # TEAM MEMBERSHIP CHECK
+        membership = (
+            TeamMember.objects
+            .select_related("team", "team__owner")
+            .filter(
+                user=user,
+                status=TeamMemberStatus.ACTIVE
+            )
+            .first()
+        )
+
+        if not membership:
+            raise ValidationError(
+                "No active subscription found. Route creation not allowed."
+            )
+
+        # TEAM OWNER SUBSCRIPTION CHECK
+        owner_subscription = cls.get_valid_subscription(
+            membership.team.owner
+        )
+
+        if not owner_subscription:
+            raise ValidationError(
+                "Team owner has no active subscription."
+            )
+
+        # MUST BE TEAM PLAN
+        if owner_subscription.plan.plan_type != PlanType.TEAM:
+            raise ValidationError(
+                "Team subscription plan is not valid for route creation."
+            )
+        return True, {
+            "access_type": "team",
+            "team": membership.team,
+            "subscription": owner_subscription
+        }
 

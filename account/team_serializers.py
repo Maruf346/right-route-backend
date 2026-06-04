@@ -47,3 +47,11 @@ class TeamMemberCreateSerializer(serializers.Serializer):
         )
         attrs["user"] = user
         return attrs
+
+class TeamMemberBulkDeleteSerializer(serializers.Serializer):
+    team_member_ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
+
+    def validate_team_member_ids(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one ID is required.")
+        return value

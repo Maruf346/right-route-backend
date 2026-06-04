@@ -10,7 +10,7 @@ def custom_exception_handler(exc, context):
             detail = response.data.get("detail") or next(iter(response.data.values()), [""])[0]
         else:
             detail = str(response.data)
-
+        print("detail: ", detail)
         custom_response = {
             "status": False,
             "detail": detail
@@ -22,5 +22,4 @@ def custom_exception_handler(exc, context):
             status=drf_status.HTTP_500_INTERNAL_SERVER_ERROR
         )
     return response
-
 

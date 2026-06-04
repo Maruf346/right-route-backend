@@ -1,8 +1,9 @@
 from django.contrib import admin
-from .models import User, OTPVerification, Team, TeamMember, UserPaymentMethod
+from .models import User, OTPVerification, Team, TeamMember, TeamMemberInvite, UserPaymentMethod
 
 admin.site.register(User)
 admin.site.register(OTPVerification)
 admin.site.register(Team)
 admin.site.register(TeamMember)
+admin.site.register(TeamMemberInvite)
 admin.site.register(UserPaymentMethod)

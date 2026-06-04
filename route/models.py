@@ -10,7 +10,7 @@ class Route(BaseModel):
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="routes")
     team = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name="routes")
 
-    title = models.CharField(max_length=255)
+    name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     route_status = models.CharField(max_length=20, choices=RouteStatus.choices, default=RouteStatus.DRAFT)
     ai_processing_status = models.CharField(max_length=20, choices=AIProcessingStatus.choices, default=AIProcessingStatus.PENDING)
@@ -20,6 +20,9 @@ class Route(BaseModel):
 
     total_waypoints = models.PositiveIntegerField(default=0)
     # route_geometry = gis_moelds.LineStringField(null=True, blank=True)
+    
+    is_completed = models.BooleanField(default=False)
+    is_favorite = models.BooleanField(default=False)
 
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -34,7 +37,7 @@ class Route(BaseModel):
     compliance_score = models.CharField(max_length=255, blank=True, null=True)
     ai_summary = models.CharField(max_length=255, blank=True, null=True)
     incident_detected = models.CharField(max_length=255, blank=True, null=True)
-    last_tracking_received_at = models.DateTimeField()
+    last_tracking_received_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         indexes = [
@@ -47,7 +50,6 @@ class Route(BaseModel):
 
 class RoutePermit(BaseModel):
     route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name="permits")
-    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     index = models.PositiveIntegerField(blank=True, null=True)
     name = models.CharField(max_length=255, blank=True, null=True)
     
@@ -59,15 +61,15 @@ class RoutePermit(BaseModel):
     end_latitude = models.FloatField(help_text="End location - Latitude")
     end_longitude = models.FloatField(help_text="End location - Longitude")
 
-    document = models.FileField(upload_to="permits/", blank=True, null=True, help_text="Imported File (PDF/Image)")
-    document_text = models.TextField(blank=True, null=True)
+    permit_file = models.FileField(upload_to="permits/", blank=True, null=True, help_text="Imported File (PDF/Image)")
+    permit_text = models.TextField(blank=True, null=True)
     extracted_text = models.TextField(blank=True, null=True)
     ai_response_json = models.JSONField(default=dict)
     processing_status = models.CharField(max_length=20, choices=PermitProcessingStatus.choices, default=PermitProcessingStatus.PENDING)
     
     
-    processing_started_at = models.DateTimeField()
-    processing_completed_at = models.DateTimeField()
+    processing_started_at = models.DateTimeField(blank=True, null=True)
+    processing_completed_at = models.DateTimeField(blank=True, null=True)
     processing_error = models.JSONField(default=dict)
     confidence_score = models.CharField(max_length=20, default=50)
     
@@ -90,8 +92,7 @@ class PermitWaypoint(BaseModel):
     
     eta_minutes = models.PositiveIntegerField(default=0)
     metadata_json = models.JSONField(default=dict)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         ordering = ['permit', 'index']
         unique_together = [['permit', 'index']]

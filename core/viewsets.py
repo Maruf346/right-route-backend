@@ -70,13 +70,26 @@ class OwnModelViewSet(ModelViewSet):
                 serializer = self.get_serializer(data=request.data)
                 serializer.is_valid(raise_exception=True)
                 return self.create_success_response(serializer)
-        except exceptions.ValidationError:
-            error = {key: str(value[0]) for key, value in serializer.errors.items()}
+        except exceptions.ValidationError as e:
+            detail = e.detail if hasattr(e, "detail") else e
+            
+            if isinstance(detail, list):
+                error = detail[0].__str__()
+            elif isinstance(detail, dict):
+                error = {
+                    key: (
+                        value[0] if isinstance(value, list) else str(value)
+                    )
+                    for key, value in detail.items()
+                }
+            else:
+                error = str(detail)
             return Response(
                 {
                     "success": False,
                     "detail": error,
-                },status=status.HTTP_400_BAD_REQUEST
+                },
+                status=status.HTTP_400_BAD_REQUEST
             )
         except exceptions.PermissionDenied as e:
             return Response(

@@ -15,9 +15,15 @@ class OTPPurpose(models.TextChoices):
     RESET = "RESET"
 
 class TeamMemberStatus(models.TextChoices):
+    PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     REMOVED = "REMOVED"
     SUSPENDED = "SUSPENDED"
+
+class TeamMemberInviteStatus(models.TextChoices):
+    PENDING = "PENDING"
+    ACCEPT = "ACCEPT"
+    EXPIRED = "EXPIRED"
 
 class PaymentMethodType(models.TextChoices):
     CARD = "CARD"
@@ -59,6 +65,8 @@ class PaymentTransactionStatus(models.TextChoices):
 class RouteStatus(models.TextChoices):
     DRAFT = "DRAFT"
     ON_GOING = "ON_GOING"
+    START = "START"
+    STOP = "STOP"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
 

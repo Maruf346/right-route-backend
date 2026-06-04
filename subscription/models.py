@@ -25,16 +25,16 @@ class UserSubscription(BaseModel):
 
     status = models.CharField(max_length=30, choices=UserSubscriptionStatus.choices, default=UserSubscriptionStatus.PENDING)
     starts_at = models.DateTimeField()
-    last_renew_at = models.DateTimeField()
-    expires_at = models.DateTimeField()
+    last_renew_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(db_index=True)
     cancelled_at = models.DateTimeField(blank=True, null=True)
     
     auto_renew = models.BooleanField(default=False)
-    renewal_attempt_count = models.CharField(max_length=20, blank=True, null=True)
+    renewal_attempt_count = models.PositiveIntegerField(default=0)
     grace_period_until = models.DateTimeField(blank=True, null=True)
 
-    payment_status = models.CharField(max_length=50, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
-    stripe_subscription_id = models.CharField(max_length=255, blank=True, null=True)
+    payment_status = models.CharField(max_length=50, choices=PaymentStatus.choices, default=PaymentStatus.PENDING, db_index=True)
+    stripe_subscription_id = models.CharField(max_length=255, blank=True, null=True, db_index=True)
     
     @property
     def is_valid(self):
@@ -44,12 +44,14 @@ class UserSubscription(BaseModel):
                 UserSubscriptionStatus.ACTIVE,
                 UserSubscriptionStatus.TRIAL,
             ]
+            and self.expires_at
             and self.expires_at > now
         ):
             return True
 
         if (
             self.status == UserSubscriptionStatus.GRACE_PERIOD
+            and self.grace_period_until
             and self.grace_period_until > now
         ):
             return True

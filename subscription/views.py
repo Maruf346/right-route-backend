@@ -15,6 +15,8 @@ from rest_framework.viewsets import GenericViewSet
 from rest_framework.exceptions import ValidationError
 import uuid
 from account.models import Team
+from django.utils import timezone
+from django.db.models import Q
 
 class SubscriptionPlanViewSet(OwnModelViewSet):
     serializer_class = SubscriptionPlanSerializer
@@ -66,6 +68,51 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
                 }
             },
             status=status.HTTP_201_CREATED
+        )
+    
+    def get_active_subscription(self, user):
+        now = timezone.now()
+        return (
+            UserSubscription.objects
+            .select_related("plan", "team")
+            .filter(user=user)
+            .filter(
+                Q(
+                    status__in=[
+                        UserSubscriptionStatus.ACTIVE,
+                        UserSubscriptionStatus.TRIAL,
+                    ],
+                    expires_at__gt=now,
+                )
+                |
+                Q(
+                    status=UserSubscriptionStatus.GRACE_PERIOD,
+                    grace_period_until__gt=now,
+                )
+            )
+            .order_by("-created_at")
+            .first()
+        )
+    
+    @action(detail=False, methods=["get"], url_path="current-plan")
+    def current_plan(self, request, *args, **kwargs):
+        subscription = self.get_active_subscription(request.user)
+        if not subscription:
+            return Response(
+                {
+                    "success": True,
+                    "data": None,
+                    "message": "No active subscription found."
+                },
+                status=status.HTTP_200_OK
+            )
+
+        return Response(
+            {
+                "success": True,
+                "data": UserSubscriptionSerializer(subscription).data
+            },
+            status=status.HTTP_200_OK
         )
     
     @action(detail=True, methods=["delete"])

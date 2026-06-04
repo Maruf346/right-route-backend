@@ -6,8 +6,7 @@ from core.constants import UserStatus, UserType, OTPPurpose, TeamMemberStatus, P
 from django.db import transaction
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.utils.translation import gettext_lazy as _
-import random
-
+import uuid
 
 class User(BaseModel, AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(max_length=255, unique=True, db_index=True)
@@ -78,7 +77,7 @@ class Team(BaseModel):
 class TeamMember(BaseModel):
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="members")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="team_memberships")
-    status = models.CharField(max_length=20, choices=TeamMemberStatus.choices, default=TeamMemberStatus.ACTIVE)
+    status = models.CharField(max_length=20, choices=TeamMemberStatus.choices, default=TeamMemberStatus.PENDING)
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -90,7 +89,20 @@ class TeamMember(BaseModel):
         ]
     
     def __str__(self):
-        return f"{self.user.email} Member of {self.team}"
+        return f"{self.user.email} Member of {self.team} ({self.status})"
+
+class TeamMemberInvite(BaseModel):
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="invites")
+    team_member_object = models.ForeignKey(TeamMember, on_delete=models.CASCADE, related_name="invites")
+    invited_to = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_team_invites")
+    status = models.CharField(max_length=20, choices=TeamMemberStatus.choices, default=TeamMemberStatus.PENDING)
+    show_popup = models.BooleanField(default=False)
+    expires_at = models.DateTimeField(db_index=True)
+    
+    def __str__(self):
+        return f"{self.invited_to} Invite for Add {self.team} Team Member ({self.status})"
+
 
 class UserPaymentMethod(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="payment_methods")

@@ -8,6 +8,7 @@ from django.utils.timezone import now
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 from subscription.views import SubscriptionPlanPayActionView
+from account.team_views import AcceptTeamInviteView
 
 # Administrator Dashboard Customized---
 admin.site.site_title = "HomeWorkerFinder"
@@ -38,6 +39,7 @@ urlpatterns = [
     
     # Payment Action API
     path("purchase/pay/for/subscription/", SubscriptionPlanPayActionView.as_view(), name="payment-action-api"),
+    path("team/invite/<uuid:uuid>/accept/", AcceptTeamInviteView.as_view(), name="invite-link"),
     
     # app urls include
     path("api/v1/", api_endpoint, name="api_endpoint"),
