@@ -32,7 +32,6 @@ urlpatterns = [
     path("auth/admin/login/",AdminLoginView.as_view(),name="admin-login"),
     
     # TeamViewSet
-    
+    path("", include(router.urls))
 ]
-urlpatterns = router.urls
 
