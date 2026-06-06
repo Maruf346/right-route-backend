@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: right_route_backend
+
+    command: >
+      sh -c "
+      python manage.py migrate &&
+      gunicorn right_route_config.wsgi:application
+      --bind 0.0.0.0:8003
+      --workers 3
+      --threads 2
+      --timeout 120
+      "
+
+    volumes:
+      - .:/app
+
+    ports:
+      - "8003:8003"
+
+    env_file:
+      - .env
+
+    restart: always
+  

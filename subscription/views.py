@@ -11,12 +11,11 @@ from rest_framework.response import Response
 from rest_framework import status
 from core.constants import UserSubscriptionStatus, PaymentStatus
 from rest_framework.views import APIView
-from rest_framework.viewsets import GenericViewSet
 from rest_framework.exceptions import ValidationError
 import uuid
-from account.models import Team
 from django.utils import timezone
 from django.db.models import Q
+from django.conf import settings
 
 class SubscriptionPlanViewSet(OwnModelViewSet):
     serializer_class = SubscriptionPlanSerializer
@@ -57,7 +56,7 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
         subscription.stripe_subscription_id=self.create_stripe_token(subscription)
         subscription.save()
         
-        generate_payment_url = f"http://127.0.0.1:8003/purchase/pay/for/subscription/?stripe-token={subscription.stripe_subscription_id}&subscription-plan-uuid={subscription.uuid}"
+        generate_payment_url = f"{settings.FRONTEND_URL}/purchase/pay/for/subscription/?stripe-token={subscription.stripe_subscription_id}&subscription-plan-uuid={subscription.uuid}"
         return Response(
             {
                 "success": True,

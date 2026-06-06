@@ -16,9 +16,6 @@ CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "*").split(",")
 
 # Application definition
 INSTALLED_APPS = [
-    # Websocket app
-    # 'channels', 'daphne',
-    
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',

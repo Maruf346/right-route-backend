@@ -11,9 +11,9 @@ from subscription.views import SubscriptionPlanPayActionView
 from account.team_views import AcceptTeamInviteView
 
 # Administrator Dashboard Customized---
-admin.site.site_title = "HomeWorkerFinder"
-admin.site.site_header = "HomeWorkerFinder"
-admin.site.app_index = "Welcome to Home Worker Finder"
+admin.site.site_title = "Right Routes"
+admin.site.site_header = "Right Routes"
+admin.site.app_index = "Welcome to Right Routes Administrator"
 
 # Main Base API Online Template
 def Home(request):
