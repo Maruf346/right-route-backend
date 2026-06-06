@@ -3,7 +3,7 @@ from django.shortcuts import get_object_or_404
 from .models import Route, RoutePermit, PermitWaypoint
 from .serializers import (
     # CreateRouteSerializer, AddPermitSerializer, WaypointSerializer,
-    RouteSerializer, RouteCreateSerializer, RouteDetailSerializer, RoutePermitSerializer, PermitSerializers, WaypointSerializer
+    RouteSerializer, RouteCreateSerializer, RouteDetailSerializer, PermitSerializers, WaypointSerializer
 )
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
@@ -12,7 +12,8 @@ from rest_framework.decorators import action
 from rest_framework import status
 from core.constants import RouteStatus
 from core.viewsets import OwnModelViewSet
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, NotFound
+from django.utils import timezone
 
 class RouteViewSets(OwnModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -46,14 +47,19 @@ class RouteViewSets(OwnModelViewSet):
         )
     
     
-    
     # -----------------------------
     # ROUTE PERMITs ALL VIEWS
+    def get_route_permit(self, route, id):
+        try:
+            return get_object_or_404(RoutePermit, pk=id, route=route)
+        except RoutePermit.DoesNotExist:
+            raise NotFound(detail="Route Permit Not Found with this id.", code=status.HTTP_404_NOT_FOUND)
+    
     @action(detail=True, methods=["get"])
     def permit(self, request, *args, **kwargs):
         route = self.get_object()
         permits = route.permits.all()
-        serializer = PermitSerializers(permits, many=True)
+        serializer = PermitSerializers(permits, many=True, context={"request": request})
         permit = serializer.data
         return Response(
             {
@@ -61,7 +67,7 @@ class RouteViewSets(OwnModelViewSet):
                 "data": {
                     "route_name": route.name,
                     "route_description": route.description,
-                    "route_status": route.route_status,
+                    "status": route.status,
                     "route_is_completed": route.is_completed,
                     "is_permit": len(permit) > 0,
                     "count": len(permit),
@@ -73,7 +79,7 @@ class RouteViewSets(OwnModelViewSet):
     @permit.mapping.post
     def add_permit(self, request, *args, **kwargs):
         try:
-            serializer = PermitSerializers(data=request.data)
+            serializer = PermitSerializers(data=request.data, context={"request": request})
             serializer.is_valid(raise_exception=True)
             serializer.save(route=self.get_object())
             return Response(
@@ -111,7 +117,7 @@ class RouteViewSets(OwnModelViewSet):
             route.permits.select_related("route"),
             id=permit_id
         )
-        serializer = PermitSerializers(permit)
+        serializer = PermitSerializers(permit, context={"request": request})
         return Response(
             {
                 "success": True,
@@ -169,6 +175,12 @@ class RouteViewSets(OwnModelViewSet):
     
     # -----------------------------
     # PERMIT WAYPOINTS ALL VIEWS
+    def get_permit_waypoint(self, permit, id):
+        try:
+            return get_object_or_404(PermitWaypoint, pk=id, permit=permit)
+        except PermitWaypoint.DoesNotExist:
+            raise NotFound(detail="Permit Waypoint Not Found with this id.", code=status.HTTP_404_NOT_FOUND)
+    
     @action(detail=True, methods=["get"], url_path="permit/(?P<permit_id>[^/.]+)/waypoint")
     def waypoint(self, request, pk=None, permit_id=None):
         try:
@@ -188,217 +200,182 @@ class RouteViewSets(OwnModelViewSet):
                 }, status=status.HTTP_404_NOT_FOUND
             )
     
-    # @action(detail=True, methods=["get"], url_path="permit/(?P<permit_id>[^/.]+)/waypoint")
-    # def waypoint(self, request, pk=None, permit_id=None):
-    #     try:
-    #         route = self.get_object()
-    #         permit = RoutePermit.objects.get(route=route,id=permit_id)
-    #         last_waypoint = permit.waypoints.order_by('index').last()
-    #         next_index = last_waypoint.index + 1 if last_waypoint else 1
-    #         serializer = WaypointSerializer(data=request.data)
-    #         serializer.is_valid(raise_exception=True)
-    #         serializer.save(permit=permit,index=next_index)
-    #         return Response({
-    #             "success": True,
-    #             "message": "Waypoint added successfully.",
-    #             "data": serializer.data
-    #         }, status=status.HTTP_201_CREATED)
-    #         return Response(
-    #             {
-    #                 "success": True,
-    #                 "message": "Deleted!"
-    #             }, status=status.HTTP_200_OK
-    #         )
-    #     except RoutePermit.DoesNotExist as e:
-    #         return Response(
-    #             {
-    #                 "success": False,
-    #                 "message": str(e)
-    #             }, status=status.HTTP_404_NOT_FOUND
-    #         )
-        
-        
-        
-        
-        
-        
+    @waypoint.mapping.post
+    def add_waypoint(self, request, pk=None, permit_id=None):
+        try:
+            route = self.get_object()
+            permit = RoutePermit.objects.get(route=route,id=permit_id)
+            last_waypoint = permit.waypoints.order_by('index').last()
+            next_index = last_waypoint.index + 1 if last_waypoint else 1
+            serializer = WaypointSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save(permit=permit,index=next_index)
+            return Response({
+                "success": True,
+                "message": "Waypoint added successfully.",
+                "data": serializer.data
+            }, status=status.HTTP_201_CREATED)
+        except RoutePermit.DoesNotExist as e:
+            return Response(
+                {
+                    "success": False,
+                    "message": str(e)
+                }, status=status.HTTP_404_NOT_FOUND
+            )
+    
+    @action(detail=True, methods=["get"], url_path="permit/(?P<permit_id>[^/.]+)/waypoint/(?P<waypoint_id>[^/.]+)")
+    def waypoint_details(self, request, pk=None, permit_id=None, waypoint_id=None):
+        try:
+            route = self.get_object()
+            permit = self.get_route_permit(route, permit_id)
+            waypoint = self.get_permit_waypoint(permit, waypoint_id)
+            serializer = WaypointSerializer(waypoint)
+            return Response({
+                "success": True,
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
+        except NotFound as e:
+            return Response(
+                {
+                    "success": False,
+                    "message": str(e)
+                }, status=status.HTTP_404_NOT_FOUND
+            )
+    
+    @waypoint_details.mapping.patch
+    def waypoint_details_update(self, request, pk=None, permit_id=None, waypoint_id=None):
+        try:
+            route = self.get_object()
+            permit = self.get_route_permit(route, permit_id)
+            waypoint = self.get_permit_waypoint(permit, waypoint_id)
+            serializer = WaypointSerializer(waypoint, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(
+                {
+                    "success": True,
+                    "data": serializer.data
+                }, status=status.HTTP_200_OK
+            )
+        except NotFound as e:
+            return Response(
+                {
+                    "success": False,
+                    "message": str(e)
+                }, status=status.HTTP_404_NOT_FOUND
+            )
+    
+    @waypoint_details.mapping.delete
+    def waypoint_details_delete(self, request, pk=None, permit_id=None, waypoint_id=None):
+        try:
+            route = self.get_object()
+            permit = self.get_route_permit(route, permit_id)
+            waypoint = self.get_permit_waypoint(permit, waypoint_id)
+            waypoint.delete()
+            return Response(
+                {
+                    "success": True,
+                    "message": "Deleted!"
+                }, status=status.HTTP_200_OK
+            )
+        except NotFound as e:
+            return Response(
+                {
+                    "success": False,
+                    "message": str(e)
+                }, status=status.HTTP_404_NOT_FOUND
+            )
+     
     # -----------------------------
-
-
     
     # -----------------------------
     # START ROUTE
-    @action(detail=True, methods=["post"], url_path="start")
-    def start_route(self, request, pk=None):
-
+    @action(detail=True, methods=["post"], url_path="drive-start")
+    def start_drive_route(self, request, pk=None):
         route = self.get_object()
-
-        route.route_status = RouteStatus.IN_PROGRESS
+        route.status = RouteStatus.START
         route.started_at = timezone.now()
-        route.save()
-
+        route.save(update_fields=["status", "started_at"])
         return Response({
             "success": True,
-            "message": "Route started successfully."
-        })
-
-    # -----------------------------
-    # COMPLETE ROUTE
-    @action(detail=True, methods=["post"], url_path="complete")
-    def complete_route(self, request, pk=None):
-
+            "message": "Route Drive started successfully."
+        }, status=status.HTTP_200_OK)
+    
+    # START ROUTE
+    @action(detail=True, methods=["post"], url_path="drive-stop")
+    def stop_drive_route(self, request, pk=None):
         route = self.get_object()
+        route.status = RouteStatus.STOP
+        route.started_at = timezone.now()
+        route.save(update_fields=["status", "started_at"])
+        return Response({
+            "success": True,
+            "message": "Route Drive Stoped."
+        }, status=status.HTTP_200_OK)
 
-        route.route_status = RouteStatus.COMPLETED
+    # COMPLETE ROUTE
+    @action(detail=True, methods=["post"], url_path="drive-complete")
+    def complete_drive_route(self, request, pk=None):
+        route = self.get_object()
+        route.status = RouteStatus.COMPLETED
         route.completed_at = timezone.now()
         route.route_progress_percentage = "100"
-        route.save()
+        route.save(update_fields=["status", "started_at"])
 
         return Response({
             "success": True,
             "message": "Route completed successfully."
-        })
+        }, status=status.HTTP_200_OK)
 
-    # -----------------------------
     # CANCEL ROUTE
-    @action(detail=True, methods=["post"], url_path="cancel")
-    def cancel_route(self, request, pk=None):
-
+    @action(detail=True, methods=["post"], url_path="drive-cancel")
+    def cancel_drive_route(self, request, pk=None):
         route = self.get_object()
-
-        route.route_status = RouteStatus.CANCELLED
+        route.status = RouteStatus.CANCELLED
         route.cancelled_at = timezone.now()
-        route.save()
+        route.save(update_fields=["status", "started_at"])
 
         return Response({
             "success": True,
             "message": "Route cancelled."
-        })
+        }, status=status.HTTP_200_OK)
 
-# class RouteCreateAPIView(generics.CreateAPIView):
-#     serializer_class = CreateRouteSerializer
-#     permission_classes = [IsAuthenticated]
-
-# class RouteListAPIView(generics.ListAPIView):
-#     queryset = Route.objects.filter(status=RouteStatus.DRAFT)
-#     serializer_class = CreateRouteSerializer
-#     permission_classes = [IsAuthenticated]
-
-# class RouteRetrieveAPIView(generics.RetrieveAPIView):
-#     queryset = Route.objects.all()
-#     serializer_class = CreateRouteSerializer
-#     permission_classes = [AllowAny]
-
-# class PermitViewset(viewsets.ModelViewSet):
-#     queryset = RoutePermit.objects.all()
-#     serializer_class = AddPermitSerializer
-#     permission_classes = [AllowAny]
-#     parser_classes = (MultiPartParser, FormParser)
-
-
-#     @action(detail=False, methods=['post'], url_path='drive-start')
-#     def drive_start(self, request, *args, **kwargs):
-#         route = self.get_route()
-#         route.status = RouteStatus.START
-#         route.save(update_fields=["status"])
-#         return Response(
-#             {
-#                 "success": True,
-#                 "message": "Drive Stared!"
-#             }
-#         )
+    # -----------------------------
     
-#     @action(detail=False, methods=['post'], url_path='drive-stop')
-#     def drive_stop(self, request, *args, **kwargs):
-#         route = self.get_route()
-#         route.status = RouteStatus.STOP
-#         route.save(update_fields=["status"])
-#         return Response(
-#             {
-#                 "success": True,
-#                 "message": "Drive Stoped!"
-#             }
-#         )
-    
-    
-#     @action(detail=True, methods=['GET', 'patch'], url_path='update-waypoint/(?P<waypoint_id>[^/.]+)')
-#     def update_waypoint(self, request, route_pk=None, pk=None, waypoint_id=None):
-#         permit = self.get_object()
-#         waypoint = get_object_or_404(Waypoint, pk=waypoint_id, permit=permit)
-        
-#         if request.method == "GET":
-#             return Response(
-#                 {
-#                     "success": True,
-#                     "data": WaypointSerializer(waypoint).data
-#                 }
-#             )
-        
-#         serializer = WaypointSerializer(waypoint, data=request.data, partial=True)
-#         serializer.is_valid(raise_exception=True)
-#         serializer.save()
-#         return Response({
-#             "success": True,
-#             "message": "Waypoint updated successfully.",
-#             "data": serializer.data
-#         })
+    # -----------------------------
+    # GET ROUTE PERMIT STARTING POINT
+    def get_last_permit(self):
+        route = self.get_object()
+        permit = route.permits.all().last()
+        return permit
 
-#     @action(detail=True, methods=['delete'], url_path='remove-waypoint/(?P<waypoint_id>[^/.]+)')
-#     def remove_waypoint(self, request, route_pk=None, pk=None, waypoint_id=None):
-#         permit = self.get_object()
-#         waypoint = get_object_or_404(Waypoint, pk=waypoint_id, permit=permit)
-#         waypoint.delete()
-#         remaining_waypoints = permit.waypoints.order_by('order')
-#         for index, wp in enumerate(remaining_waypoints, start=1):
-#             wp.order = index
-#         Waypoint.objects.bulk_update(
-#             remaining_waypoints,
-#             ['order']
-#         )
-#         return Response({
-#             "success": True,
-#             "message": "Waypoint removed successfully."
-#         })
+    @action(detail=True, methods=["get"], url_path="permit-starting-point")
+    def permit_starting_point(self, request, *args, **kwargs):
+        try:
+            last_permit = self.get_last_permit()
+            if last_permit:
+                response = {
+                    "start_location_name": last_permit.end_location,
+                    "start_latitude": last_permit.end_latitude,
+                    "start_longitude": last_permit.end_longitude
+                }
+            else:
+                response = None
+            return Response(
+                {
+                    "status": True,
+                    "data": response
+                }, status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {
+                    "status": False,
+                    "message": str(e)
+                }, status=status.HTTP_400_BAD_REQUEST
+            )
     
+    # -----------------------------
 
-# class GetPermitStartingPoint(views.APIView):
-#     def get_route(self):
-#         route_pk = self.kwargs.get("route_pk", None)
-#         if route_pk is None:
-#             raise Exception("Route id not found.")
-#         route = get_object_or_404(Route, pk=route_pk)
-#         if not route:
-#             raise Exception("Route not found with this id.")
-#         return route
-    
-#     def get_last_permit(self):
-#         route = self.get_route()
-#         permit = route.permits.all().last()
-#         return permit
-    
-#     def get(self, request, *args, **kwargs):
-#         try:
-#             last_permit = self.get_last_permit()
-#             if last_permit:
-#                 response = {
-#                     "start_location_name": last_permit.end_location_name,
-#                     "start_latitude": last_permit.end_latitude,
-#                     "start_longitude": last_permit.end_longitude
-#                 }
-#             else:
-#                 response = None
-#             return Response(
-#                 {
-#                     "status": True,
-#                     "data": response
-#                 }, status=status.HTTP_200_OK
-#             )
-#         except Exception as e:
-#             return Response(
-#                 {
-#                     "status": False,
-#                     "message": str(e)
-#                 }, status=status.HTTP_400_BAD_REQUEST
-#             )
 
 

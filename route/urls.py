@@ -6,6 +6,8 @@ router = DefaultRouter()
 router.register(r"route", RouteViewSets, basename="route")
 
 urlpatterns = [
-    path("", include(router.urls))
+    path("", include(router.urls)),
+    
+    # path("route/")
 ]
 

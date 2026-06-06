@@ -12,7 +12,7 @@ class Route(BaseModel):
 
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
-    route_status = models.CharField(max_length=20, choices=RouteStatus.choices, default=RouteStatus.DRAFT)
+    status = models.CharField(max_length=20, choices=RouteStatus.choices, default=RouteStatus.DRAFT)
     ai_processing_status = models.CharField(max_length=20, choices=AIProcessingStatus.choices, default=AIProcessingStatus.PENDING)
 
     total_distance_km = models.FloatField(default=0)
@@ -41,7 +41,7 @@ class Route(BaseModel):
 
     class Meta:
         indexes = [
-            models.Index(fields=["route_status"]),
+            models.Index(fields=["status"]),
             models.Index(fields=["created_by"]),
         ]
 

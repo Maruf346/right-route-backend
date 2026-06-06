@@ -7,21 +7,11 @@ import os
 from django.db import transaction
 from subscription.services.validators import RouteAccessValidator
 
-# class CreateRouteSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Route
-#         fields = ['id', 'name', 'description', 'status', 'is_completed', 'is_favorite']
-#         read_only_fields = ['status']
-
-
-
-
-
 class RouteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Route
-        fields = ["id", "name", "description", "route_status", "total_distance_km", "estimated_duration", "started_at", "completed_at", "cancelled_at", "route_progress_percentage"]
-        read_only_fields = ("route_status", "total_distance_km", "estimated_duration", "started_at", "completed_at", "cancelled_at", "route_progress_percentage")
+        fields = ["id", "name", "description", "status", "total_distance_km", "estimated_duration", "started_at", "completed_at", "cancelled_at", "route_progress_percentage"]
+        read_only_fields = ("status", "total_distance_km", "estimated_duration", "started_at", "completed_at", "cancelled_at", "route_progress_percentage")
 
 class RouteCreateSerializer(serializers.ModelSerializer):
 
@@ -61,8 +51,8 @@ class RouteDetailSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Route
-        fields = ["id", "created_by_email", "name", "description", "route_status", "total_distance_km", "estimated_duration", "started_at", "completed_at", "cancelled_at", "route_progress_percentage", "permits"]
-        read_only_fields = ("route_status", "total_distance_km", "estimated_duration", "started_at", "completed_at", "cancelled_at", "route_progress_percentage")
+        fields = ["id", "created_by_email", "name", "description", "status", "total_distance_km", "estimated_duration", "started_at", "completed_at", "cancelled_at", "route_progress_percentage", "permits"]
+        read_only_fields = ("status", "total_distance_km", "estimated_duration", "started_at", "completed_at", "cancelled_at", "route_progress_percentage")
 
 
 # =================== Route Permits =================
@@ -86,6 +76,14 @@ class PermitSerializers(serializers.ModelSerializer):
             "permit_file", "permit_text", "extracted_text", "waypoints"
         ]
         read_only_fields = ["id", "route", "index", "total_distance"]
+    
+    def get_permit_file(self, obj):
+        request = self.context.get("request")
+        if obj.permit_file:
+            if request:
+                return request.build_absolute_uri(obj.permit_file.url)
+            return obj.permit_file.url
+        return None
     
     def extract_route_data(self, permit_file):
         url = "http://16.192.4.30:8001/api/ocr/extract"
@@ -147,12 +145,16 @@ class PermitSerializers(serializers.ModelSerializer):
                 address_list_lat_lng.append(address_lat_lng)
         return address_list_lat_lng
     
+    def validate(self, attrs):
+        if not attrs.get("permit_file"):
+            raise serializers.ValidationError({
+                "permit_file": "Permit document must be submitted."
+            })
+        return attrs
+    
     def create(self, validated_data):
         route = validated_data.get('route')
         permit_file = validated_data.get('permit_file')
-        if not permit_file:
-            raise ValidationError("Permit Documents must be submited!")
-        
         max_index_agg = RoutePermit.objects.filter(route=route).aggregate(Max('index'))
         current_max = max_index_agg['index__max']
         validated_data['index'] = (current_max or 0) + 1
