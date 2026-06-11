@@ -46,7 +46,6 @@ class LoginSerializer(serializers.Serializer):
             otp_code=otp_code,
             purpose=OTPPurpose.LOGIN,
         )
-        
         # send otp email here
         return True
 
@@ -88,7 +87,7 @@ class CreatePasswordSerializer(serializers.Serializer):
 
         # send otp email here
         return user
-    
+
 class VerifyOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp_code = serializers.CharField(max_length=6)
@@ -99,6 +98,7 @@ class VerifyOTPSerializer(serializers.Serializer):
     def validate(self, attrs):
         email = attrs["email"]
         otp_code = (attrs["otp_code"])
+        print("ot: ", otp_code)
         otp = OTPVerification.objects.filter(
             user__email=email,
             otp_code=otp_code,
@@ -129,6 +129,55 @@ class VerifyOTPSerializer(serializers.Serializer):
         refresh = RefreshToken.for_user(user)
         return refresh
 
+class ResendOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        value = value.lower()
+        user = User.objects.filter(
+            email=value
+        ).first()
+        if not user:
+            raise serializers.ValidationError(
+                "Account not found."
+            )
+        self.user = user
+        return value
+
+    def resend_otp(self):
+        OTPVerification.objects.filter(
+            user=self.user,
+            is_verified=False,
+        ).delete()
+        otp_code = "123456"
+        OTPVerification.objects.create(
+            user=self.user,
+            otp_code=otp_code,
+            purpose=OTPPurpose.LOGIN,
+        )
+        # send email here
+        return True
+
+class ChangeEmailSerializer(serializers.Serializer):
+    new_email = serializers.EmailField()
+
+    def validate_new_email(self, value):
+        value = value.lower()
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError(
+                "Email already exists."
+            )
+        return value
+
+    def save(self):
+        user = self.context["request"].user
+        user.email = self.validated_data["new_email"]
+        user.is_email_verified = False
+        user.save(
+            update_fields=["email", "is_email_verified"]
+        )
+        return user
+
 class ChangePasswordSerializer(serializers.Serializer):
     new_password = serializers.CharField(write_only=True, min_length=6)
 
@@ -143,3 +192,5 @@ class ChangePasswordSerializer(serializers.Serializer):
         user.set_password(new_password)
         user.save()
         return user
+
+

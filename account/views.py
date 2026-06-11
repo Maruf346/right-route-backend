@@ -12,9 +12,11 @@ from .serializers import (
     ContinueSerializer,
     LoginSerializer,
     CreatePasswordSerializer,
-    VerifyOTPSerializer, ChangePasswordSerializer
+    VerifyOTPSerializer, ChangePasswordSerializer,
+    ResendOTPSerializer, ChangeEmailSerializer,
 )
 from .utils import OwnAPIView
+from django.db import transaction
 
 
 class ContinueAPIView(OwnAPIView):
@@ -41,14 +43,15 @@ class LoginAPIView(OwnAPIView):
     permission_classes = []
     
     def success_response(self, serializer):
-        serializer.send_login_otp()
-        return Response(
-            {
-                "success": True,
-                "detail": "OTP sent successfully.",
-                "next_step": "VERIFY_OTP"
-            }
-        )
+        with transaction.atomic():
+            serializer.send_login_otp()
+            return Response(
+                {
+                    "success": True,
+                    "detail": "OTP sent successfully.",
+                    "next_step": "VERIFY_OTP"
+                }
+            )
 
 class CreatePasswordAPIView(OwnAPIView):
     serializer_class = CreatePasswordSerializer
@@ -63,6 +66,66 @@ class CreatePasswordAPIView(OwnAPIView):
                 "next_step": "VERIFY_OTP"
             },
             status=status.HTTP_201_CREATED
+        )
+
+
+class ResendOTPAPIView(OwnAPIView):
+    serializer_class = ResendOTPSerializer
+    permission_classes = []
+
+    def success_response(self, serializer):
+        serializer.resend_otp()
+        return Response(
+            {
+                "success": True,
+                "detail": "OTP re-sent successfully."
+            }, status=status.HTTP_200_OK
+        )
+
+class ChangeEmailAPIView(APIView):
+    serializer_class = ChangeEmailSerializer
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            with transaction.atomic():
+                serializer = self.serializer_class(data=request.data,context={"request": request})
+                serializer.is_valid(raise_exception=True)
+                serializer.save()
+                return Response(
+                    {
+                        "success": True,
+                        "detail": "Email updated successfully."
+                    },
+                    status=status.HTTP_200_OK
+                )
+        except ValidationError:
+            error = {key: str(value[0]) for key, value in serializer.errors.items()}
+            return Response(
+                {
+                    "success": False,
+                    "detail": error
+                }, status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {
+                    "success": False,
+                    "detail": str(e)
+                }, status=status.HTTP_400_BAD_REQUEST
+            )
+
+class AccountDeleteAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = self.request.user
+        user.delete()
+        return Response(
+            {
+                "success": True,
+                "detail": "Account Deleted successful."
+            }, status=status.HTTP_200_OK
         )
 
 class VerifyOTPAPIView(OwnAPIView):
