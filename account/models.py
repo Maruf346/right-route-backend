@@ -15,8 +15,7 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
     is_email_verified = models.BooleanField(default=False)
 
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)
-    last_device_info = models.TextField(blank=True, null=True)
-
+    
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     
@@ -38,7 +37,8 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
         return self.email
 
 class OTPVerification(BaseModel):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="otps")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="otps", blank=True, null=True)
+    email = models.EmailField(max_length=200, blank=True, null=True)
     otp_code = models.CharField(max_length=10)
     purpose = models.CharField(max_length=20, choices=OTPPurpose.choices)
     is_verified = models.BooleanField(default=False)
@@ -54,12 +54,12 @@ class OTPVerification(BaseModel):
 
     class Meta:
         indexes = [
-            models.Index(fields=["user"]),
+            models.Index(fields=["email"]),
             models.Index(fields=["otp_code"]),
         ]
     
     def __str__(self):
-        return f"{self.otp_code} OTP for {self.user.email}"
+        return f"{self.otp_code} OTP for {self.email}"
 
 class Team(BaseModel):
     owner = models.OneToOneField(User, on_delete=models.CASCADE, related_name="owned_team")
@@ -103,6 +103,11 @@ class TeamMemberInvite(BaseModel):
     def __str__(self):
         return f"{self.invited_to} Invite for Add {self.team} Team Member ({self.status})"
 
+class UserLogDevice(BaseModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="login_device")
+    device_name = models.CharField(max_length=200, blank=True, null=True)
+    device_token = models.CharField(max_length=200, blank=True, null=True)
+    device_info = models.JSONField(default=dict)
 
 class UserPaymentMethod(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="payment_methods")
