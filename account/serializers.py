@@ -4,10 +4,13 @@ from django.contrib.auth.password_validation import (
 )
 from rest_framework import serializers
 from account.models import User, OTPVerification
-from core.constants import OTPPurpose
+from core.constants import OTPPurpose, CurrentPlanType, PlanType
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
-
+import random
+from subscription.models import UserSubscription
+from .models import Team, TeamMember
+from core.constants import TeamMemberStatus, UserSubscriptionStatus
 
 
 class ContinueSerializer(serializers.Serializer):
@@ -37,8 +40,7 @@ class CreatePasswordSerializer(serializers.Serializer):
         return attrs
 
     def generate_otp(self):
-        otp_code = "123456"
-        return otp_code
+        return str(random.randint(100000, 999999))
     
     def send_otp(self, user) -> OTPVerification:
         OTPVerification.objects.filter(email=user.email).delete()        
@@ -63,47 +65,46 @@ class CreatePasswordSerializer(serializers.Serializer):
         self.send_otp(user=user)
         return user
 
-class ResendOTPSerializer(serializers.Serializer):
+class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    purpose = serializers.ChoiceField(choices=OTPPurpose.choices)
-
+    password = serializers.CharField(write_only=True)
+    
     def validate_email(self, value):
-        value = value.lower()
-        user = User.objects.filter(
-            email=value
-        ).first()
+        return value.lower()
+    
+    def validate(self, attrs):
+        email = attrs.get("email")
+        password = attrs.get("password")
+        user = authenticate(
+            email=email,
+            password=password
+        )
         if not user:
             raise serializers.ValidationError(
-                "Account not found."
+                "Invalid credentials."
+            )
+        if not user.is_active:
+            raise serializers.ValidationError(
+                "Account disabled."
             )
         self.user = user
-        return value
+        return attrs
+    
+    def get_user(self):
+        return self.user
 
-    def validate_purpose(self, value):
-        if value not in [OTPPurpose.LOGIN, OTPPurpose.REGISTER, OTPPurpose.RESET]:
-            raise serializers.ValidationError("Wrong Type Input")
-        return value
-    
-    def generate_otp(self):
-        otp_code = "123456"
-        return otp_code
-    
-    def resend_otp(self):
-        OTPVerification.objects.filter(user=self.user).delete()
-        purpose = self.validated_data["purpose"]
-        OTPVerification.objects.create(
-            user=self.user,
-            email=self.user.email,
-            otp_code=self.generate_otp(),
-            purpose=purpose
-        )
-        # send email here
-        return True
+    def get_token(self, request):
+        user = self.get_user()
+        user.last_login_ip = (request.META.get("REMOTE_ADDR"))
+        user.save()
+        refresh = RefreshToken.for_user(user)
+        # self.create_or_get_device_info(request)
+        return refresh
 
 class VerifyOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp_code = serializers.CharField(max_length=6)
-    for_log = serializers.BooleanField(required=False)
+    purpose = serializers.ChoiceField(required=True, choices=OTPPurpose.choices)
 
     def validate_email(self, value):
         value = value.lower()
@@ -119,10 +120,12 @@ class VerifyOTPSerializer(serializers.Serializer):
     
     def validate(self, attrs):
         email = attrs["email"]
+        purpose = attrs["purpose"]
         otp_code = (attrs["otp_code"])
         otp = OTPVerification.objects.filter(
             user__email=email,
             otp_code=otp_code,
+            purpose=purpose,
             is_verified=False,
         ).first()
         if not otp:
@@ -134,10 +137,6 @@ class VerifyOTPSerializer(serializers.Serializer):
     
     def get_user(self):
         return self.user
-    
-    # def create_or_get_device_info(self, request):
-    #     user = self.get_user()
-    #     return True
     
     def get_token(self, request):
         otp = self.validated_data["otp"]
@@ -171,46 +170,41 @@ class VerifyOTPSerializer(serializers.Serializer):
         # self.create_or_get_device_info(request)
         return request
 
-class LoginSerializer(serializers.Serializer):
+class ResendOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
-    
-    def validate_email(self, value):
-        return value.lower()
+    purpose = serializers.ChoiceField(choices=OTPPurpose.choices)
 
-    # def create_or_get_device_info(self, request):
-    #     user = self.get_user()
-    #     return True
-    
-    def validate(self, attrs):
-        email = attrs.get("email")
-        password = attrs.get("password")
-        user = authenticate(
-            email=email,
-            password=password
-        )
+    def validate_email(self, value):
+        value = value.lower()
+        user = User.objects.filter(
+            email=value
+        ).first()
         if not user:
             raise serializers.ValidationError(
-                "Invalid credentials."
-            )
-        if not user.is_active:
-            raise serializers.ValidationError(
-                "Account disabled."
+                "Account not found."
             )
         self.user = user
-        return attrs
+        return value
+
+    def validate_purpose(self, value):
+        if value not in [OTPPurpose.LOGIN, OTPPurpose.REGISTER, OTPPurpose.RESET]:
+            raise serializers.ValidationError("Wrong Type Input")
+        return value
     
-    def get_user(self):
-        return self.user
-
-    def get_token(self, request):
-        user = self.get_user()
-        user.last_login_ip = (request.META.get("REMOTE_ADDR"))
-        user.save()
-        refresh = RefreshToken.for_user(user)
-        # self.create_or_get_device_info(request)
-        return refresh
-
+    def generate_otp(self):
+        return str(random.randint(100000, 999999))
+    
+    def resend_otp(self):
+        OTPVerification.objects.filter(user=self.user).delete()
+        purpose = self.validated_data["purpose"]
+        OTPVerification.objects.create(
+            user=self.user,
+            email=self.user.email,
+            otp_code=self.generate_otp(),
+            purpose=purpose
+        )
+        # send email here
+        return True
 
 # Forget and Reset Password---
 class ForgetPasswordSerializer(serializers.Serializer):
@@ -229,8 +223,7 @@ class ForgetPasswordSerializer(serializers.Serializer):
         return value
 
     def generate_otp(self):
-        otp_code = "123456"
-        return otp_code
+        return str(random.randint(100000, 999999))
     
     def send_otp(self) -> OTPVerification:
         email = self.validated_data["email"]
@@ -283,12 +276,7 @@ class ResetPasswordSerializer(serializers.Serializer):
     
     def get_user(self):
         return self.user
-    
-    # def create_or_get_device_info(self, request):
-    #     user = self.get_user()
-    #     last_device_info = (request.headers.get("User-Agent"))
-    #     return True
-    
+
     def get_token(self, request):
         otp = self.validated_data["otp"]
         otp.is_verified = True
@@ -303,9 +291,6 @@ class ResetPasswordSerializer(serializers.Serializer):
         
         # self.create_or_get_device_info(request)
         return refresh
-
-
-
 
 class ChangeEmailSerializer(serializers.Serializer):
     new_email = serializers.EmailField()
@@ -343,3 +328,70 @@ class ChangePasswordSerializer(serializers.Serializer):
         return user
 
 
+
+
+
+class CurrentUserSerializer(serializers.ModelSerializer):
+    current_plan_type = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "email",
+            "current_plan_type",
+        ]
+    
+    def get_current_plan_type(self, user):
+        membership = (
+            TeamMember.objects
+            .select_related("team", "team__owner")
+            .filter(
+                user=user,
+                status=TeamMemberStatus.ACTIVE
+            )
+            .first()
+        )
+
+        if membership:
+            owner_team_subscription = (
+                UserSubscription.objects
+                .filter(
+                    user=membership.team.owner,
+                    team=membership.team,
+                    plan__plan_type=PlanType.TEAM,
+                )
+                .order_by("-created_at")
+                .first()
+            )
+
+            if owner_team_subscription and owner_team_subscription.is_valid:
+                return "TEAM_MEMBER"
+
+        # 2. Check User Active Subscription
+        subscription = (
+            UserSubscription.objects
+            .filter(user=user)
+            .select_related("plan")
+            .order_by("-created_at")
+            .first()
+        )
+
+        if not subscription or not subscription.is_valid:
+            return "NONE"
+
+        # 3. Active Team Subscription
+        if subscription.plan.plan_type == PlanType.TEAM:
+            return "TEAM_MANAGER"
+
+        # 4. Active Individual Subscription
+        if subscription.plan.plan_type == PlanType.INDIVIDUAL:
+            return "INDIVIDUAL"
+
+        return "NONE"
+
+class DeviceInfoSerializer(serializers.Serializer):
+    device_id = serializers.CharField(max_length=255)
+
+    def validate_device_id(self, value):
+        return value.strip()

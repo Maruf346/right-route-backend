@@ -13,7 +13,9 @@ from .views import (
     LogoutAPIView,
     VerifyTokenAPIView, ChangePasswordView, ResendOTPAPIView, ChangeEmailAPIView, AccountDeleteAPIView,
     
-    ForgetPasswordView, ResetPasswordView
+    ForgetPasswordView, ResetPasswordView,
+    
+    CurrentUserAPIView
 )
 from .team_views import TeamViewSet
 
@@ -29,11 +31,8 @@ urlpatterns = [
     path("auth/create-password/",CreatePasswordAPIView.as_view(),name="create-password"),
     path("auth/verify-otp/",VerifyOTPAPIView.as_view(),name="verify-otp"),
     
-    
     path("auth/forget-password/",ForgetPasswordView.as_view(),name="forget-password"),
     path("auth/reset-password/",ResetPasswordView.as_view(),name="reset-password"),
-    
-    
     
     path("auth/refresh-token/",RefreshTokenAPIView.as_view(),name="refresh-token"),
     path("auth/verify-token/",VerifyTokenAPIView.as_view(),name="verify-token"),
@@ -44,6 +43,7 @@ urlpatterns = [
     path("auth/change-email/", ChangeEmailAPIView.as_view(), name="change-email",),
     path("auth/account-delete/", AccountDeleteAPIView.as_view(), name="account-delete",),
     
+    path("userinfo/", CurrentUserAPIView.as_view(), name="current-user"),
     
     path("auth/admin/login/",AdminLoginView.as_view(),name="admin-login"),
     

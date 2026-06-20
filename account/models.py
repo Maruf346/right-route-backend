@@ -32,6 +32,24 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
             models.Index(fields=["email"]),
             models.Index(fields=["user_type"]),
         ]
+    
+    # @property
+    # def current_plan_type(self):
+    #     if TeamMember.objects.filter(
+    #         user=self,
+    #         status=TeamMemberStatus.ACTIVE
+    #     ).exists():
+    #         return "TEAM_MEMBER"
+    #     subscription = (
+    #         self.subscriptions
+    #         .order_by("-created_at")
+    #         .first()
+    #     )
+    #     if not subscription or not subscription.is_valid:
+    #         return "NONE"
+    #     if hasattr(self, "owned_team"):
+    #         return "TEAM_MANAGER"
+    #     return "INDIVIDUAL"
 
     def __str__(self):
         return self.email
@@ -106,8 +124,8 @@ class TeamMemberInvite(BaseModel):
 class UserLogDevice(BaseModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="login_device")
     device_name = models.CharField(max_length=200, blank=True, null=True)
-    device_token = models.CharField(max_length=200, blank=True, null=True)
-    device_info = models.JSONField(default=dict)
+    device_id = models.CharField(max_length=200, blank=True, null=True)
+    device_info = models.JSONField(default=dict, blank=True, null=True)
 
 class UserPaymentMethod(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="payment_methods")

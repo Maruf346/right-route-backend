@@ -82,6 +82,7 @@ class RoutePermit(BaseModel):
 
 class PermitWaypoint(BaseModel):
     permit = models.ForeignKey(RoutePermit, on_delete=models.CASCADE, related_name="waypoints",)
+    route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name="waypoints", blank=True, null=True)
     index = models.PositiveIntegerField(blank=True, null=True)
     name = models.CharField(max_length=255, help_text="Waypoints Name (like as: 'Exit 340')")
     waypoint_type = models.CharField(max_length=20, choices=WaypointType.choices, default=WaypointType.CHECKPOINT)

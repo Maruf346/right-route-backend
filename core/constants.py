@@ -4,6 +4,12 @@ class UserType(models.TextChoices):
     ADMIN = "ADMIN"
     MAIN_USER = "MAIN_USER"
 
+class CurrentPlanType(models.TextChoices):
+    NONE = "NONE", "No Plan"
+    INDIVIDUAL = "INDIVIDUAL", "Individual Plan"
+    TEAM_MANAGER = "TEAM_MANAGER", "Team Manager"
+    TEAM_MEMBER = "TEAM_MEMBER", "Team Member"
+
 class UserStatus(models.TextChoices):
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
