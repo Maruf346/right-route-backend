@@ -6,6 +6,7 @@ from rest_framework.exceptions import ValidationError
 from django.db.models import Max
 import requests
 import os
+from core.models import AIExtractResponse
 
 class RouteListSerializer(serializers.ModelSerializer):
     permit_count = serializers.SerializerMethodField(read_only=True)
@@ -93,6 +94,11 @@ class RouteCreateSerializer(serializers.Serializer):
                     "Documents Extract Failed!"
                 )
             response_data = response.json()
+            
+            try:
+                AIExtractResponse.objects.create(response_json=response_data)
+            except:
+                AIExtractResponse.objects.create(response_text=response_data)
             
             if not response_data.get('success') and not response_data.get('route_information'):
                 raise ValidationError(
