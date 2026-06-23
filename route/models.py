@@ -46,7 +46,7 @@ class Route(BaseModel):
         ]
 
     def __str__(self):
-        return self.title
+        return self.name or super().__str__()
 
 class RoutePermit(BaseModel):
     route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name="permits")
