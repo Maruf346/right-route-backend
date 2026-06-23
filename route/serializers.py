@@ -156,8 +156,13 @@ class RouteCreateSerializer(serializers.Serializer):
         permit_text = validated_data.get("permit_text", None)
         route_data = self.extract_route_data(permit_file or permit_text)
         
-        print("all intersection: ", route_data['intersection'][:-1])
-        waypoints = self.get_intersection_lat_lng(route_data['intersection'][:-1])
+        intersection = route_data['intersection'][:-1]
+        try:
+            AIExtractResponse.objects.create(response_json=intersection)
+        except:
+            AIExtractResponse.objects.create(response_text=intersection)
+        
+        waypoints = self.get_intersection_lat_lng(intersection)
         waypoint_objects = []
         
         for index, wp in enumerate(waypoints, start=1):
