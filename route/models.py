@@ -92,8 +92,7 @@ class PermitWaypoint(BaseModel):
     icon = models.CharField(max_length=50, default="📍")
     
     eta_minutes = models.PositiveIntegerField(default=0)
-    metadata_json = models.JSONField(default=dict)
-
+    
     class Meta:
         ordering = ['permit', 'index']
         unique_together = [['permit', 'index']]

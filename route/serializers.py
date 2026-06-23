@@ -185,7 +185,11 @@ class RouteCreateSerializer(serializers.Serializer):
                 name=validated_data["name"]
             )
             permit = self.create_permit(validated_data, route)
-            PermitWaypoint.objects.bulk_create(self.get_waypoints(validated_data, permit, route))
+            permit_waypoint = PermitWaypoint.objects.bulk_create(self.get_waypoints(validated_data, permit, route))
+            try:
+                AIExtractResponse.objects.create(response_json=str(permit_waypoint))
+            except:
+                AIExtractResponse.objects.create(response_text=str(permit_waypoint))
             return route
 
 class PermitSerializers(serializers.ModelSerializer):
