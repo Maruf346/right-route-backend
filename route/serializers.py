@@ -119,8 +119,15 @@ class RouteCreateSerializer(serializers.Serializer):
                 "address": address,
                 "key": os.getenv("google_map_api_key")
             }
+            # response = requests.get(url, params=params)
+            # data = response.json()
+            
             response = requests.get(url, params=params)
+            AIExtractResponse.objects.create(response_json=str(response))
             data = response.json()
+            AIExtractResponse.objects.create(response_json=str(data))
+            
+            
             if data["status"] == "OK":
                 location = data["results"][0]["geometry"]["location"]
                 address_lat_lng = {
@@ -153,10 +160,6 @@ class RouteCreateSerializer(serializers.Serializer):
         intersection = route_data['intersection'][:-1]
         
         waypoints = self.get_intersection_lat_lng(intersection)
-        try:
-            AIExtractResponse.objects.create(response_json=waypoints)
-        except:
-            AIExtractResponse.objects.create(response_text=waypoints)
         waypoint_objects = []
         
         for index, wp in enumerate(waypoints, start=1):
@@ -184,11 +187,7 @@ class RouteCreateSerializer(serializers.Serializer):
                 name=validated_data["name"]
             )
             permit = self.create_permit(validated_data, route)
-            permit_waypoint = PermitWaypoint.objects.bulk_create(self.get_waypoints(validated_data, permit, route))
-            try:
-                AIExtractResponse.objects.create(response_json=str(permit_waypoint))
-            except:
-                AIExtractResponse.objects.create(response_text=str(permit_waypoint))
+            PermitWaypoint.objects.bulk_create(self.get_waypoints(validated_data, permit, route))
             return route
 
 class PermitSerializers(serializers.ModelSerializer):
