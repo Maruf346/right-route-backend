@@ -23,7 +23,7 @@ class TeamDetailSerializer(serializers.ModelSerializer):
 
     def get_used_members(self, obj):
         return obj.members.filter(
-            status=TeamMemberStatus.ACTIVE
+            status=True
         ).count()
 
 
@@ -55,3 +55,9 @@ class TeamMemberBulkDeleteSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("At least one ID is required.")
         return value
+
+class TeamMemberUpdateSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = TeamMember
+        fields = ["status"]

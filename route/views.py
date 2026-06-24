@@ -4,7 +4,8 @@ from .models import Route, RoutePermit, PermitWaypoint
 from .serializers import (
     RouteListSerializer, RouteDetailSerializer, RouteCreateSerializer, PermitSerializers, WaypointSerializer, RouteBulkDeleteSerializer
 )
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.filters import SearchFilter
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -17,6 +18,9 @@ from django.db import transaction
 
 class RouteViewSets(OwnModelViewSet):
     permission_classes = [IsAuthenticated]
+    filter_backends = [SearchFilter, DjangoFilterBackend]
+    search_fields = ["id", "name", "status"]
+    filterset_fields = ["status",]
     
     def get_serializer_class(self):
         if self.action == "create":
@@ -401,6 +405,75 @@ class RouteViewSets(OwnModelViewSet):
             status=status.HTTP_200_OK
         )
         
+    @action(detail=True, methods=["post"], url_path="duplicate-route")
+    def duplicate_route(self, request, pk=None):
+        try:
+            source_route = self.get_object()
+            with transaction.atomic():
+                new_route = Route.objects.create(
+                    created_by=request.user,
+                    team=source_route.team,
+                    name=f"{source_route.name} (Copy)",
+                    description=source_route.description,
+                    status=RouteStatus.DRAFT,
+                    total_distance_km=source_route.total_distance_km,
+                    estimated_duration=source_route.estimated_duration,
+                    total_waypoints=source_route.total_waypoints,
+                )
+                for permit in source_route.permits.all():
+                    old_waypoints = permit.waypoints.all()
+                    new_permit = RoutePermit.objects.create(
+                        route=new_route,
+                        index=permit.index,
+                        name=permit.name,
+                        start_location=permit.start_location,
+                        start_latitude=permit.start_latitude,
+                        start_longitude=permit.start_longitude,
+                        end_location=permit.end_location,
+                        end_latitude=permit.end_latitude,
+                        end_longitude=permit.end_longitude,
+                        permit_text=permit.permit_text,
+                        extracted_text=permit.extracted_text,
+                        ai_response_json=permit.ai_response_json,
+                        processing_status=permit.processing_status,
+                        confidence_score=permit.confidence_score,
+                    )
 
+                    waypoint_objects = []
+                    for wp in old_waypoints:
+                        waypoint_objects.append(
+                            PermitWaypoint(
+                                permit=new_permit,
+                                route=new_route,
+                                index=wp.index,
+                                name=wp.name,
+                                waypoint_type=wp.waypoint_type,
+                                latitude=wp.latitude,
+                                longitude=wp.longitude,
+                                description=wp.description,
+                                icon=wp.icon,
+                                eta_minutes=wp.eta_minutes,
+                            )
+                        )
+                    PermitWaypoint.objects.bulk_create(waypoint_objects)
+            return Response(
+                {
+                    "success": True,
+                    "message": "Route duplicated successfully.",
+                    "route": {
+                        "id": new_route.id,
+                        "name": new_route.name,
+                    }
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            return Response(
+                {
+                    "success": False,
+                    "message": str(e)
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 

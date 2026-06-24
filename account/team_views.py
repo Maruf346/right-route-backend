@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -13,10 +14,12 @@ from .team_serializers import (
     TeamDetailSerializer,
     TeamMemberSerializer,
     TeamMemberCreateSerializer,
-    TeamMemberBulkDeleteSerializer
+    TeamMemberBulkDeleteSerializer,
+    TeamMemberUpdateSerializer
 )
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 
 
 class TeamViewSet(ListModelMixin, GenericViewSet):
@@ -41,19 +44,26 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
         queryset = (
             TeamMember.objects
             .select_related("user")
-            .filter(
-                team=self.get_team()
-            )
+            .filter(team=self.get_team())
             .order_by("-joined_at")
         )
-
-        serializer = TeamMemberSerializer(queryset, many=True)
-
+        
+        status_param = request.query_params.get("status")
+        if status_param is not None:
+            status_bool = status_param.lower() == "true"
+            queryset = queryset.filter(status=status_bool)
+        
+        search = request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(user__email__icontains=search)
+            )
+        
         return Response(
             {
                 "success": True,
-                "count": len(serializer.data),
-                "data": serializer.data
+                "count": queryset.count(),
+                "data": TeamMemberSerializer(queryset, many=True).data
             }
         )
 
@@ -77,7 +87,7 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
                 user = serializer.validated_data["user"]
                 team = self.get_team()
                 member, created = TeamMember.objects.get_or_create(team=team,user=user, defaults={
-                    "status": TeamMemberStatus.PENDING
+                    "status": False
                 })
                 
                 invite_uuid, accept_link = self.send_invite(team, member)
@@ -99,6 +109,30 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+    @action(detail=False, methods=["get"], url_path=r"member/(?P<member_id>[^/.]+)")
+    def detail_member(self, request, member_id=None):
+        member = get_object_or_404(TeamMember, id=member_id, team=self.get_team())
+        return Response(
+            {
+                "success": True,
+                "data": TeamMemberSerializer(member).data
+            }
+        )
+    
+    @detail_member.mapping.patch
+    def update_member(self, request, member_id=None):
+        member = get_object_or_404(TeamMember, id=member_id, team=self.get_team())
+        serializer = TeamMemberUpdateSerializer(member, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {
+                "success": True,
+                "message": "Member updated successfully.",
+                "data": TeamMemberSerializer(member).data
+            }
+        )
+    
     @action(detail=False, methods=["post"], url_path="remove-member")
     def remove_member(self, request, *args, **kwargs):
         serializer = TeamMemberBulkDeleteSerializer(data=request.data)
