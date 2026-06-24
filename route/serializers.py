@@ -14,7 +14,7 @@ class RouteListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Route
-        fields = ["id", "name", "status", "is_completed", "permit_count"]
+        fields = ["id", "name", "status", "is_completed", "permit_count", "created_at"]
     
     def get_permit_count(self, obj):
         return obj.permits.count()
@@ -339,4 +339,9 @@ class PermitSerializers(serializers.ModelSerializer):
                     waypoint_objects.append(waypoint)
                 PermitWaypoint.objects.bulk_create(waypoint_objects)
             return instance
+
+
+class RouteBulkDeleteSerializer(serializers.Serializer):
+    route_ids = serializers.ListField(child=serializers.IntegerField(), min_length=1)
+
 

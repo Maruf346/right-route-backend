@@ -2,7 +2,7 @@ from rest_framework import generics, viewsets, views
 from django.shortcuts import get_object_or_404
 from .models import Route, RoutePermit, PermitWaypoint
 from .serializers import (
-    RouteListSerializer, RouteDetailSerializer, RouteCreateSerializer, PermitSerializers, WaypointSerializer
+    RouteListSerializer, RouteDetailSerializer, RouteCreateSerializer, PermitSerializers, WaypointSerializer, RouteBulkDeleteSerializer
 )
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
@@ -13,6 +13,7 @@ from core.constants import RouteStatus
 from core.viewsets import OwnModelViewSet
 from rest_framework.exceptions import ValidationError, NotFound
 from django.utils import timezone
+from django.db import transaction
 
 class RouteViewSets(OwnModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -379,6 +380,27 @@ class RouteViewSets(OwnModelViewSet):
             )
     
     # -----------------------------
+    
+    @action(detail=False, methods=["delete"], url_path="bulk-delete")
+    def bulk_delete(self, request):
+        serializer = RouteBulkDeleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        route_ids = serializer.validated_data["route_ids"]
+        with transaction.atomic():
+            routes = Route.objects.filter(
+                id__in=route_ids,
+                created_by=request.user
+            )
+            deleted_count = routes.count()
+            routes.delete()
+        return Response(
+            {
+                "success": True,
+                "message": f"{deleted_count} routes deleted successfully."
+            },
+            status=status.HTTP_200_OK
+        )
+        
 
 
 
