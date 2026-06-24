@@ -7,6 +7,7 @@ from django.db.models import Max
 import requests
 import os
 from core.models import AIExtractResponse
+from django.conf import settings
 
 class RouteListSerializer(serializers.ModelSerializer):
     permit_count = serializers.SerializerMethodField(read_only=True)
@@ -117,7 +118,8 @@ class RouteCreateSerializer(serializers.Serializer):
             url = "https://maps.googleapis.com/maps/api/geocode/json"
             params = {
                 "address": address,
-                "key": os.getenv("google_map_api_key")
+                "key": settings.GOOGLE_MAP_API_KEY
+                # "key": os.getenv("GOOGLE_MAP_API_KEY")
             }
             # response = requests.get(url, params=params)
             # data = response.json()
@@ -259,10 +261,12 @@ class PermitSerializers(serializers.ModelSerializer):
             url = "https://maps.googleapis.com/maps/api/geocode/json"
             params = {
                 "address": address,
-                "key": os.getenv("google_map_api_key")
+                "key": settings.GOOGLE_MAP_API_KEY
             }
             response = requests.get(url, params=params)
+            AIExtractResponse.objects.create(response_json=str(response))
             data = response.json()
+            AIExtractResponse.objects.create(response_json=str(data))
             if data["status"] == "OK":
                 location = data["results"][0]["geometry"]["location"]
                 address_lat_lng = {
