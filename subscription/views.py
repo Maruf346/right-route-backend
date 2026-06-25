@@ -105,7 +105,6 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
                 },
                 status=status.HTTP_200_OK
             )
-
         return Response(
             {
                 "success": True,
