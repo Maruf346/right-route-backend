@@ -26,6 +26,7 @@ from .utils import OwnAPIView
 from django.db import transaction
 from core.constants import OTPPurpose
 import random
+from .emailsend import EmailOTPSend
 
 
 class DeviceInfoView(APIView):
@@ -122,7 +123,8 @@ class ContinueAPIView(OwnAPIView):
         otp_object = OTPVerification.objects.create(
             user=user, email=email, purpose=purpose, otp_code=self.generate_otp()
         )
-        # send otp email here
+        
+        EmailOTPSend(otp_object)
         return otp_object
 
     def success_response(self, serializer):

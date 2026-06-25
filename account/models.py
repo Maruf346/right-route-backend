@@ -37,7 +37,7 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
     # def current_plan_type(self):
     #     if TeamMember.objects.filter(
     #         user=self,
-    #         status=TeamMemberStatus.ACTIVE
+    #         status=True
     #     ).exists():
     #         return "TEAM_MEMBER"
     #     subscription = (
@@ -87,7 +87,7 @@ class Team(BaseModel):
     
     @property
     def used_members(self, obj):
-        return obj.members.filter(status=TeamMemberStatus.ACTIVE).count()
+        return obj.members.filter(status=True).count()
     
     def __str__(self):
         return f"{self.name} of {self.owner.email}"

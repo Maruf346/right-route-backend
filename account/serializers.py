@@ -11,6 +11,8 @@ import random
 from subscription.models import UserSubscription
 from .models import Team, TeamMember
 from core.constants import TeamMemberStatus, UserSubscriptionStatus
+from .emailsend import EmailOTPSend
+from django.db import transaction
 
 
 class ContinueSerializer(serializers.Serializer):
@@ -52,18 +54,19 @@ class CreatePasswordSerializer(serializers.Serializer):
             ),
             otp_code=self.generate_otp()
         )
-        # send otp email here
+        EmailOTPSend(otp_object)
         return otp_object
     
     def create_user(self):
-        email = self.validated_data["email"]
-        password = (self.validated_data["password"])
-        user = User.objects.create_user(
-            email=email,
-            password=password,
-        )
-        self.send_otp(user=user)
-        return user
+        with transaction.atomic():
+            email = self.validated_data["email"]
+            password = (self.validated_data["password"])
+            user = User.objects.create_user(
+                email=email,
+                password=password,
+            )
+            self.send_otp(user=user)
+            return user
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -197,13 +200,13 @@ class ResendOTPSerializer(serializers.Serializer):
     def resend_otp(self):
         OTPVerification.objects.filter(user=self.user).delete()
         purpose = self.validated_data["purpose"]
-        OTPVerification.objects.create(
+        otp_object = OTPVerification.objects.create(
             user=self.user,
             email=self.user.email,
             otp_code=self.generate_otp(),
             purpose=purpose
         )
-        # send email here
+        EmailOTPSend(otp_object)
         return True
 
 # Forget and Reset Password---
@@ -348,7 +351,7 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             .select_related("team", "team__owner")
             .filter(
                 user=user,
-                status=TeamMemberStatus.ACTIVE
+                status=True
             )
             .first()
         )

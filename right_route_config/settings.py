@@ -207,3 +207,12 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 GOOGLE_MAP_API_KEY = os.getenv("GOOGLE_MAP_API_KEY")
 
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_USE_TLS = True
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+EMAIL_PORT = '587'
+
+

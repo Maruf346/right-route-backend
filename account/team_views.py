@@ -180,7 +180,7 @@ class AcceptTeamInviteView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         member = invite.team_member_object
-        member.status = TeamMemberStatus.ACTIVE
+        member.status = True
         member.save()
 
         invite.status = TeamMemberInviteStatus.ACCEPT

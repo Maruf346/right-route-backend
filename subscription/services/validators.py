@@ -38,7 +38,7 @@ class SubscriptionValidator:
             .select_related("team", "team__owner")
             .filter(
                 user=user,
-                status=TeamMemberStatus.ACTIVE
+                status=True
             )
             .first()
         )
@@ -123,7 +123,7 @@ class TeamMemberValidator:
 
         # Team limit validation
         active_members = team.members.filter(
-            status=TeamMemberStatus.ACTIVE
+            status=True
         ).count()
 
         if active_members >= subscription.plan.team_limit:
@@ -146,7 +146,7 @@ class TeamMemberValidator:
             .select_related("team", "team__owner")
             .filter(
                 user=target_user,
-                status=TeamMemberStatus.ACTIVE
+                status=True
             )
             .first()
         )
@@ -199,7 +199,7 @@ class RouteAccessValidator:
             .select_related("team", "team__owner")
             .filter(
                 user=user,
-                status=TeamMemberStatus.ACTIVE
+                status=True
             )
             .first()
         )
