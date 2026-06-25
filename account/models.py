@@ -95,6 +95,7 @@ class Team(BaseModel):
 class TeamMember(BaseModel):
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="members")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="team_memberships")
+    username = models.CharField(max_length=255, blank=True, null=True)
     status = models.BooleanField(default=False)
     joined_at = models.DateTimeField(auto_now_add=True)
 

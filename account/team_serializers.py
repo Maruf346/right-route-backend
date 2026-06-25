@@ -29,6 +29,7 @@ class TeamDetailSerializer(serializers.ModelSerializer):
 
 
 class TeamMemberCreateSerializer(serializers.Serializer):
+    username = serializers.CharField(required=False)
     email = serializers.EmailField()
 
     def validate(self, attrs):
@@ -46,6 +47,59 @@ class TeamMemberCreateSerializer(serializers.Serializer):
             target_user=user
         )
         attrs["user"] = user
+        return attrs
+
+class MultpleTeamMemberCreateSerializer(serializers.Serializer):
+    invite_user = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+
+    def validate(self, attrs):
+        request = self.context["request"]
+
+        validated_users = []
+        errors = []
+
+        for item in attrs["invite_user"]:
+            email = item.get("email")
+            username = item.get("username")
+            if not email:
+                errors.append({
+                    "email": "Email is required."
+                })
+                continue
+
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                errors.append({
+                    "email": email,
+                    "error": "User not found."
+                })
+                continue
+
+            try:
+                TeamMemberValidator.validate_add_member(
+                    owner=request.user,
+                    target_user=user
+                )
+            except Exception as e:
+                errors.append({
+                    "email": email,
+                    "error": str(e)
+                })
+                continue
+
+            validated_users.append({
+                "user": user,
+                "username": username,
+                "email": email,
+            })
+
+        if errors:
+            raise serializers.ValidationError({
+                "invite_user": errors
+            })
+
+        attrs["users"] = validated_users
         return attrs
 
 class TeamMemberBulkDeleteSerializer(serializers.Serializer):

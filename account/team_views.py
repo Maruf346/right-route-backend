@@ -14,12 +14,14 @@ from .team_serializers import (
     TeamDetailSerializer,
     TeamMemberSerializer,
     TeamMemberCreateSerializer,
+    MultpleTeamMemberCreateSerializer,
     TeamMemberBulkDeleteSerializer,
     TeamMemberUpdateSerializer
 )
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
+from account.emailsend import EmailInvitationLink
 
 
 class TeamViewSet(ListModelMixin, GenericViewSet):
@@ -67,6 +69,8 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
             }
         )
 
+
+    
     def send_invite(self, team, member):
         invite = TeamMemberInvite.objects.create(
             team=team,
@@ -75,7 +79,7 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
             expires_at=timezone.now() + timezone.timedelta(days=1)
         )
         accept_link = f"{settings.FRONTEND_URL}/team/invite/{invite.uuid}/accept"
-        return invite.uuid, accept_link
+        return invite, accept_link
     
     @members.mapping.post
     def add_member(self, request):
@@ -89,16 +93,62 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
                 member, created = TeamMember.objects.get_or_create(team=team,user=user, defaults={
                     "status": False
                 })
-                
-                invite_uuid, accept_link = self.send_invite(team, member)
+                invite, accept_link = self.send_invite(team, member)
+                EmailInvitationLink(invite, accept_link)
                 return Response({
                     "success": True,
                     "message": "Invitation sent successfully.",
                     "data": {
-                        "invite_id": str(invite_uuid),
+                        "invite_id": str(invite.uuid),
                         "accept_link": accept_link
                     }
                 }, status=status.HTTP_201_CREATED)
+        except ValidationError:
+            error = {key: str(value[0]) for key, value in serializer.errors.items()}
+            return Response(
+                {
+                    "success": False,
+                    "detail": error
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=False, methods=["post"], url_path="multiple-members-add")
+    def multiple_add_member(self, request):
+        try:
+            with transaction.atomic():
+                serializer = MultpleTeamMemberCreateSerializer(data=request.data, context={"request": request})
+                serializer.is_valid(raise_exception=True)
+                team = self.get_team()
+                invited_users = []
+                with transaction.atomic():
+                    for item in serializer.validated_data["users"]:
+                        user = item["user"]
+                        member, created = TeamMember.objects.get_or_create(
+                            team=team,
+                            user=user,
+                            defaults={
+                                "status": False
+                            }
+                        )
+                        
+                        invite, accept_link = self.send_invite(team, member)
+                        EmailInvitationLink(invite, accept_link)
+
+                        invited_users.append({
+                            "invite_id": str(invite.uuid),
+                            "email": user.email,
+                            "accept_link": accept_link
+                        })
+
+                return Response(
+                    {
+                        "success": True,
+                        "message": f"{len(invited_users)} invitation(s) sent successfully.",
+                        "data": invited_users
+                    },
+                    status=status.HTTP_201_CREATED
+                )
         except ValidationError:
             error = {key: str(value[0]) for key, value in serializer.errors.items()}
             return Response(

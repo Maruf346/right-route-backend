@@ -105,7 +105,7 @@ class LogStatus(models.TextChoices):
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
 
-# Notification APP---
+# Core APP---
 class MailConfigType(models.TextChoices):
     SMTP = "smtp"
     API = "api"
