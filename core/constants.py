@@ -50,7 +50,6 @@ class UserSubscriptionStatus(models.TextChoices):
     ACTIVE = "ACTIVE"
     EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
-    PAST_DUE = "PAST_DUE"
     FAILED = "FAILED"
     TRIAL = "TRIAL"
     GRACE_PERIOD = "GRACE_PERIOD"
@@ -66,6 +65,15 @@ class PaymentTransactionStatus(models.TextChoices):
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
     REFUNDED = "REFUNDED"
+
+class PURCHASE_PLATFORM(models.TextChoices):
+    ANDROID = "android"
+    IOS = "ios"
+
+class PURCHASE_VERIFY_STATUS(models.TextChoices):
+    PENDING = "pending"
+    VERIFIED = "verified"
+    FAILED = "failed"
 
 # Route APP-------
 class RouteStatus(models.TextChoices):

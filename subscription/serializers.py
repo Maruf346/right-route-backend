@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from core.constants import PURCHASE_PLATFORM
 
 from .models import SubscriptionPlan, UserSubscription
 
@@ -6,7 +7,7 @@ from .models import SubscriptionPlan, UserSubscription
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubscriptionPlan
-        fields = ("id", "name", "plan_type", "billing_type", "team_limit", "price", "features_json", "is_active", "created_at", "updated_at", )
+        fields = ("id", "name", "plan_type", "billing_type", "team_limit", "price", "currency", "features_json", "is_active", "created_at", "updated_at", )
         read_only_fields = ("id", "created_at", "updated_at")
 
 
@@ -41,12 +42,6 @@ class UserSubscriptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserSubscription
         exclude = ("user", "team", "plan")
-        # fields = "__all__"
-        # read_only_fields = (
-        #     "id",
-        #     "created_at",
-        #     "updated_at",
-        # )
 
 class PurchaseSubscriptionSerializer(serializers.Serializer):
     plan_id = serializers.IntegerField()
@@ -64,5 +59,27 @@ class PurchaseSubscriptionSerializer(serializers.Serializer):
         self.context["plan"] = plan
         return value
 
+class VerifyPurchaseSerializer(serializers.Serializer):
+    platform = serializers.ChoiceField(choices=PURCHASE_PLATFORM.choices)
+    subscription_plan_uuid = serializers.CharField(required=True)
+    transaction_id = serializers.CharField(required=False)
+    product_id = serializers.CharField(required=False)
+    purchase_token = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    receipt_data = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    package_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    # def validate(self, attrs):
+    #     platform = attrs["platform"]
+    #     if platform == PURCHASE_PLATFORM.ANDROID:
+    #         if not attrs.get("purchase_token"):
+    #             raise serializers.ValidationError({
+    #                 "purchase_token": "Required for Android."
+    #             })
+    #     elif platform == PURCHASE_PLATFORM.IOS:
+    #         if not attrs.get("receipt_data"):
+    #             raise serializers.ValidationError({
+    #                 "receipt_data": "Required for iOS."
+    #             })
+    #     return attrs
 
 

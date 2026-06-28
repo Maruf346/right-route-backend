@@ -7,7 +7,6 @@ from django.http import JsonResponse
 from django.utils.timezone import now
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
-from subscription.views import SubscriptionPlanPayActionView
 from account.team_views import AcceptTeamInviteView
 
 # Administrator Dashboard Customized---
@@ -38,7 +37,6 @@ urlpatterns = [
     path("", Home, name="WelcomeAPI"),
     
     # Payment Action API
-    path("purchase/pay/for/subscription/", SubscriptionPlanPayActionView.as_view(), name="payment-action-api"),
     path("team/invite/<uuid:uuid>/accept/", AcceptTeamInviteView.as_view(), name="invite-link"),
     
     # app urls include
