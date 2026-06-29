@@ -29,6 +29,7 @@ class TeamMemberStatus(models.TextChoices):
 class TeamMemberInviteStatus(models.TextChoices):
     PENDING = "PENDING"
     ACCEPT = "ACCEPT"
+    REJECT = "REJECT"
     EXPIRED = "EXPIRED"
 
 class PaymentMethodType(models.TextChoices):

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Create Your Right Routes Account</title>
+</head>
+
+<body style="margin:0;padding:0;background:#f3f7fb;font-family:Arial,Helvetica,sans-serif;">
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f7fb;padding:30px 0;">
+        <tr>
+            <td align="center">
+
+                <table width="650" cellpadding="0" cellspacing="0"
+                    style="background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.08);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td align="center"
+                            style="background:linear-gradient(135deg,#0f766e,#14b8a6);padding:45px 30px;">
+
+                            <div style="
+                                width:80px;
+                                height:80px;
+                                line-height:80px;
+                                background:rgba(255,255,255,0.15);
+                                border-radius:50%;
+                                font-size:38px;
+                                color:#ffffff;
+                                margin:auto;">
+                                🛣️
+                            </div>
+
+                            <h1 style="
+                                color:#ffffff;
+                                margin:20px 0 10px;
+                                font-size:32px;
+                                font-weight:700;">
+                                Right Routes
+                            </h1>
+
+                            <p style="
+                                color:#d1fae5;
+                                margin:0;
+                                font-size:16px;">
+                                Route Navigation & Permit Management Platform
+                            </p>
+
+                        </td>
+                    </tr>
+
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding:45px 40px;">
+
+                            <h2 style="
+                                margin-top:0;
+                                color:#0f172a;
+                                font-size:28px;">
+                                You're Invited to Join Right Routes
+                            </h2>
+
+                            <p style="
+                                color:#475569;
+                                font-size:16px;
+                                line-height:1.8;">
+                                Hello <strong>{{ invited_email }}</strong>,
+                            </p>
+
+                            <p style="
+                                color:#475569;
+                                font-size:16px;
+                                line-height:1.8;">
+                                You've been invited to join the
+                                <strong>{{ team_name }}</strong>
+                                team on
+                                <strong>Right Routes</strong>.
+                            </p>
+
+                            <p style="
+                                color:#475569;
+                                font-size:16px;
+                                line-height:1.8;">
+                                We couldn't find an existing Right Routes account
+                                associated with this email address.
+                            </p>
+
+                            <p style="
+                                color:#475569;
+                                font-size:16px;
+                                line-height:1.8;">
+                                To accept this invitation, you'll first need to
+                                create your free Right Routes account.
+                                After registration, you'll automatically be able
+                                to accept your team invitation.
+                            </p>
+
+                            <div style="
+                                background:#ecfeff;
+                                border:1px solid #99f6e4;
+                                border-left:5px solid #14b8a6;
+                                border-radius:12px;
+                                padding:20px;
+                                margin:30px 0;">
+
+                                <h3 style="
+                                    margin-top:0;
+                                    color:#115e59;
+                                    font-size:18px;">
+                                    Getting Started
+                                </h3>
+
+                                <ul style="
+                                    color:#334155;
+                                    padding-left:20px;
+                                    margin-bottom:0;
+                                    line-height:1.8;">
+
+                                    <li>Create your Right Routes account.</li>
+
+                                    <li>Verify your email address if prompted.</li>
+
+                                    <li>Return to your invitation.</li>
+
+                                    <li>Accept the invitation and join your team.</li>
+
+                                    <li>Start collaborating immediately.</li>
+
+                                </ul>
+
+                            </div>
+
+                            <div style="
+                                background:#f8fafc;
+                                border:1px solid #e2e8f0;
+                                border-radius:14px;
+                                padding:25px;
+                                margin:30px 0;">
+
+                                <p style="margin:0 0 12px;color:#334155;">
+                                    <strong>Team Name:</strong>
+                                    {{ team_name }}
+                                </p>
+
+                                <p style="margin:0 0 12px;color:#334155;">
+                                    <strong>Invitation Email:</strong>
+                                    {{ invited_email }}
+                                </p>
+
+                                <p style="margin:0;color:#334155;">
+                                    <strong>Invitation Expires:</strong>
+                                    {{ expires_at }}
+                                </p>
+
+                            </div>
+                            <div style="text-align:center;margin:40px 0;">
+
+                                <a href="{{ accept_link }}" style="
+                                        background:linear-gradient(135deg,#0f766e,#14b8a6);
+                                        color:#ffffff;
+                                        text-decoration:none;
+                                        padding:16px 36px;
+                                        border-radius:10px;
+                                        font-size:16px;
+                                        font-weight:600;
+                                        display:inline-block;">
+                                    Create Account &amp; Join Team
+                                </a>
+
+                            </div>
+
+                            <p style="
+                                color:#475569;
+                                font-size:16px;
+                                line-height:1.8;">
+                                Clicking the button above will take you to the
+                                Right Routes registration page. After creating
+                                your account, you'll be able to accept your team
+                                invitation using the same email address.
+                            </p>
+
+                            <p style="
+                                color:#64748b;
+                                font-size:15px;
+                                line-height:1.8;">
+                                If the button above doesn't work, copy and paste
+                                the following link into your browser:
+                            </p>
+
+                            <div style="
+                                background:#f8fafc;
+                                border:1px solid #e2e8f0;
+                                padding:15px;
+                                border-radius:8px;
+                                word-break:break-all;
+                                color:#0f766e;
+                                font-size:14px;">
+
+                                {{ accept_link }}
+
+                            </div>
+
+                            <div style="
+                                margin-top:35px;
+                                background:#fefce8;
+                                border-left:5px solid #eab308;
+                                padding:20px;
+                                border-radius:10px;">
+
+                                <strong style="
+                                    color:#854d0e;
+                                    font-size:16px;">
+                                    Important
+                                </strong>
+
+                                <p style="
+                                    margin:12px 0 0;
+                                    color:#713f12;
+                                    line-height:1.8;">
+
+                                    Please register using the same email address
+                                    (<strong>{{ invited_email }}</strong>)
+                                    that received this invitation.
+
+                                </p>
+
+                                <p style="
+                                    margin:15px 0 0;
+                                    color:#713f12;
+                                    line-height:1.8;">
+
+                                    Your invitation will remain valid until
+                                    <strong>{{ expires_at }}</strong>.
+
+                                </p>
+
+                                <p style="
+                                    margin:15px 0 0;
+                                    color:#713f12;
+                                    line-height:1.8;">
+
+                                    If you create your account using a different
+                                    email address, this invitation cannot be
+                                    linked automatically.
+
+                                </p>
+
+                                <p style="
+                                    margin:15px 0 0;
+                                    color:#713f12;
+                                    line-height:1.8;">
+
+                                    If you weren't expecting this invitation,
+                                    you can safely ignore this email.
+
+                                </p>
+
+                            </div>
+
+                            <p style="
+                                margin-top:40px;
+                                color:#475569;
+                                font-size:16px;
+                                line-height:1.8;">
+
+                                We look forward to welcoming you to
+                                <strong>{{ team_name }}</strong> and helping you
+                                get started with Right Routes.
+
+                            </p>
+
+                            <p style="
+                                margin-top:35px;
+                                color:#475569;
+                                font-size:16px;">
+
+                                Best regards,<br>
+                                <strong>Right Routes Team</strong>
+
+                            </p>
+
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td align="center" style="
+                                background:#f8fafc;
+                                border-top:1px solid #e2e8f0;
+                                padding:30px;">
+
+                            <h3 style="
+                                margin:0;
+                                color:#0f172a;">
+                                Right Routes
+                            </h3>
+
+                            <p style="
+                                margin:10px 0;
+                                color:#64748b;
+                                font-size:14px;">
+                                Route Navigation & Permit Management System
+                            </p>
+                            <p style="
+                                color:#94a3b8;
+                                font-size:13px;
+                                margin-top:15px;">
+                                © 2026 Right Routes. All Rights Reserved.
+                            </p>
+
+                            <p style="
+                                color:#94a3b8;
+                                font-size:12px;
+                                line-height:1.7;
+                                margin-top:10px;">
+                                This is an automated email sent by Right Routes.
+                                Please do not reply to this email.
+                            </p>
+
+                        </td>
+                    </tr>
+
+                </table>
+
+                <div style="
+                    margin-top:20px;
+                    color:#94a3b8;
+                    font-size:12px;
+                    text-align:center;
+                    line-height:1.7;">
+
+                    You received this email because
+                    <strong>{{ invited_email }}</strong>
+                    was invited to join the
+                    <strong>{{ team_name }}</strong>
+                    team on Right Routes.
+
+                </div>
+
+            </td>
+        </tr>
+    </table>
+
+</body>
+
+</html>

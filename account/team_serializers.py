@@ -54,49 +54,30 @@ class MultpleTeamMemberCreateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         request = self.context["request"]
-
         validated_users = []
-        errors = []
-
         for item in attrs["invite_user"]:
             email = item.get("email")
             username = item.get("username")
+            
             if not email:
-                errors.append({
+                raise serializers.ValidationError({
                     "email": "Email is required."
                 })
-                continue
 
-            try:
-                user = User.objects.get(email=email)
-            except User.DoesNotExist:
-                errors.append({
-                    "email": email,
-                    "error": "User not found."
-                })
-                continue
-
+            user, created = User.objects.get_or_create(email=email)
             try:
                 TeamMemberValidator.validate_add_member(
                     owner=request.user,
                     target_user=user
                 )
             except Exception as e:
-                errors.append({
-                    "email": email,
-                    "error": str(e)
-                })
-                continue
+                raise serializers.ValidationError(str(e))
 
             validated_users.append({
                 "user": user,
                 "username": username,
                 "email": email,
-            })
-
-        if errors:
-            raise serializers.ValidationError({
-                "invite_user": errors
+                "created": created
             })
 
         attrs["users"] = validated_users

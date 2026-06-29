@@ -69,8 +69,8 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
             }
         )
 
-
-    
+    # ----------------------------------------------------------------------------------
+    # Add single or Multiple Member Add ----------
     def send_invite(self, team, member):
         invite = TeamMemberInvite.objects.create(
             team=team,
@@ -121,6 +121,7 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
                 serializer.is_valid(raise_exception=True)
                 team = self.get_team()
                 invited_users = []
+                
                 with transaction.atomic():
                     for item in serializer.validated_data["users"]:
                         user = item["user"]
@@ -133,11 +134,12 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
                         )
                         
                         invite, accept_link = self.send_invite(team, member)
-                        EmailInvitationLink(invite, accept_link)
+                        EmailInvitationLink(invite, accept_link, user.has_usable_password())
 
                         invited_users.append({
                             "invite_id": str(invite.uuid),
                             "email": user.email,
+                            "non_register_user": user.has_usable_password(),
                             "accept_link": accept_link
                         })
 
@@ -159,6 +161,9 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+    # Add single or Multiple Member Add ----------
+    # ----------------------------------------------------------------------------------
+    # Member Details view and Update ----------
     @action(detail=False, methods=["get"], url_path=r"member/(?P<member_id>[^/.]+)")
     def detail_member(self, request, member_id=None):
         member = get_object_or_404(TeamMember, id=member_id, team=self.get_team())
@@ -183,6 +188,8 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
             }
         )
     
+    # Member Details view and Update ----------
+    # ------------------------------------------------------------------------------------
     @action(detail=False, methods=["post"], url_path="remove-member")
     def remove_member(self, request, *args, **kwargs):
         serializer = TeamMemberBulkDeleteSerializer(data=request.data)

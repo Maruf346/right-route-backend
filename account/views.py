@@ -1,13 +1,13 @@
 from django.contrib.auth import logout
-from  django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.request import Request
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework import status
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
-from account.models import User, OTPVerification, UserLogDevice
-from rest_framework.exceptions import ValidationError, NotFound
+from account.models import User, OTPVerification, UserLogDevice, TeamMemberInvite, TeamMember
+from rest_framework.exceptions import ValidationError, NotFound, PermissionDenied
 from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from .serializers import (
     ContinueSerializer,
@@ -24,9 +24,11 @@ from .serializers import (
 )
 from .utils import OwnAPIView
 from django.db import transaction
-from core.constants import OTPPurpose
+from core.constants import OTPPurpose, TeamMemberInviteStatus
 import random
 from .emailsend import EmailOTPSend
+from django.contrib.auth.hashers import identify_hasher
+from django.utils import timezone
 
 
 class DeviceInfoView(APIView):
@@ -119,7 +121,7 @@ class ContinueAPIView(OwnAPIView):
         return str(random.randint(100000, 999999))
 
     def send_otp(self, email: str, purpose: OTPPurpose, user=None) -> OTPVerification:
-        OTPVerification.objects.filter(email=email).delete()
+        OTPVerification.objects.filter(email=email, purpose=OTPPurpose.LOGIN).delete()
         otp_object = OTPVerification.objects.create(
             user=user, email=email, purpose=purpose, otp_code=self.generate_otp()
         )
@@ -127,10 +129,18 @@ class ContinueAPIView(OwnAPIView):
         EmailOTPSend(otp_object)
         return otp_object
 
+    def user_has_valid_password(self, email):
+        try:
+            user = User.objects.get(email=email)
+            identify_hasher(user.password)
+            return True
+        except:
+            return False
+    
     def success_response(self, serializer):
         email = serializer.validated_data["email"]
-        user_exists = User.objects.filter(email=email).exists()
-        if user_exists:
+        register_user_exists = self.user_has_valid_password(email)
+        if register_user_exists:
             otp_object = self.send_otp(
                 email=email,
                 purpose=OTPPurpose.LOGIN,
@@ -140,8 +150,8 @@ class ContinueAPIView(OwnAPIView):
             {
                 "success": True,
                 "email": email,
-                "is_registered": user_exists,
-                "next_step": ("OTP_VERIFY" if user_exists else "CREATE_PASSWORD"),
+                "is_registered": register_user_exists,
+                "next_step": ("OTP_VERIFY" if register_user_exists else "CREATE_PASSWORD"),
             }
         )
 
@@ -377,10 +387,100 @@ class CurrentUserAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        serializer = CurrentUserSerializer(request.user)
-
+        user = request.user
+        serializer = CurrentUserSerializer(user)
         return Response({
             "success": True,
             "data": serializer.data
         })
 
+class AcceptTeamMemberInvitation(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def validate_invitation(self, invitation_uuid) -> TeamMemberInvite:
+        try:
+            invitation = (
+                TeamMemberInvite.objects
+                .select_for_update()
+                .select_related("team", "team_member_object")
+                .get(uuid=invitation_uuid)
+            )
+        except TeamMemberInvite.DoesNotExist:
+            raise ValidationError("Invitation not found.")
+
+        if invitation.invited_to != self.request.user:
+            raise PermissionDenied("This invitation does not belong to you.")
+
+        if invitation.status != TeamMemberInviteStatus.PENDING:
+            raise ValidationError(f"Invite already {invitation.status.capitalize()}.")
+        if invitation.expires_at < timezone.now():
+            raise ValidationError("Invitation has expired.")
+        return invitation
+    
+    def post(self, request, *args, **kwargs):
+        data = request.data
+        invitation_uuid = data.get("invitation_uuid", None)
+        action = data.get("action", None)
+        ALLOWED_ACTIONS = {
+            TeamMemberInviteStatus.ACCEPT,
+            TeamMemberInviteStatus.REJECT,
+        }
+        
+        if not invitation_uuid:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Invitation UUID is required."
+                }, status=status.HTTP_400_BAD_REQUEST
+            )
+        if not action:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Invitation action be submit."
+                }, status=status.HTTP_400_BAD_REQUEST
+            )
+        if action.strip().upper() not in ALLOWED_ACTIONS:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Wrong invation status submit."
+                }, status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        action_status = action.strip().upper()
+        invitation = self.validate_invitation(invitation_uuid)
+        team_member_object = invitation.team_member_object
+        
+        with transaction.atomic():
+            if (
+                action_status == TeamMemberInviteStatus.ACCEPT
+                and TeamMember.objects.filter(
+                    team=invitation.team,
+                    user=request.user,
+                    status=True,
+                ).exists()
+            ):
+                raise ValidationError("You are already a member of this team.")
+            
+            invitation.status = action_status
+            invitation.show_popup = False
+            invitation.save(update_fields=["status", "show_popup"])
+            
+            if action_status == TeamMemberInviteStatus.ACCEPT:
+                team_member_object.status = True
+                team_member_object.save(update_fields=["status"])
+            else:
+                team_member_object.delete()
+            
+            message = (
+                "Team invitation accepted successfully."
+                if action_status == TeamMemberInviteStatus.ACCEPT
+                else "Team invitation rejected successfully."
+            )
+            return Response(
+                {
+                    "success": True,
+                    "message": message
+                }
+            )

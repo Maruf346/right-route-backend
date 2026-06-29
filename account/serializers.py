@@ -9,10 +9,11 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 import random
 from subscription.models import UserSubscription
-from .models import Team, TeamMember
+from .models import Team, TeamMember, TeamMemberInvite
 from core.constants import TeamMemberStatus, UserSubscriptionStatus
 from .emailsend import EmailOTPSend
 from django.db import transaction
+from django.contrib.auth.hashers import identify_hasher
 
 
 class ContinueSerializer(serializers.Serializer):
@@ -25,14 +26,22 @@ class CreatePasswordSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
+    def user_has_valid_password(self, user):
+        try:
+            identify_hasher(user.password)
+            return True
+        except:
+            return False
+    
     def validate_email(self, value):
         value = value.lower()
-        if User.objects.filter(
-            email=value
-        ).exists():
-            raise serializers.ValidationError(
-                "Account already exists."
-            )
+        user = User.objects.filter(email=value)
+        if User.objects.filter(email=value).exists():
+            user = User.objects.get(email=value)
+            if self.user_has_valid_password(user):
+                raise serializers.ValidationError(
+                    "Account already exists."
+                )
         return value
 
     def validate(self, attrs):
@@ -61,10 +70,10 @@ class CreatePasswordSerializer(serializers.Serializer):
         with transaction.atomic():
             email = self.validated_data["email"]
             password = (self.validated_data["password"])
-            user = User.objects.create_user(
-                email=email,
-                password=password,
-            )
+            user, created = User.objects.get_or_create(email=email)
+            user.set_password(password)
+            user.save(update_fields=["password"])
+            
             self.send_otp(user=user)
             return user
 
@@ -336,14 +345,11 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 class CurrentUserSerializer(serializers.ModelSerializer):
     current_plan_type = serializers.SerializerMethodField()
+    team_invitation_popup = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = [
-            "id",
-            "email",
-            "current_plan_type",
-        ]
+        fields = ["id", "email", "current_plan_type", "team_invitation_popup"]
     
     def get_current_plan_type(self, user):
         membership = (
@@ -392,9 +398,31 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             return "INDIVIDUAL"
 
         return "NONE"
+    
+    def get_team_invitation_popup(self, user):
+        invite = (
+            TeamMemberInvite.objects.select_related("team")
+            .filter(invited_to=user, status=TeamMemberStatus.PENDING, show_popup=True)
+            .order_by("-created_at")
+            .first()
+        )
+        
+        if not invite:
+            return None
+
+        return {
+            "uuid": str(invite.uuid),
+            "team_name": invite.team.name,
+            "expires_at": invite.expires_at,
+            "show_popup": invite.show_popup,
+        }
+
 
 class DeviceInfoSerializer(serializers.Serializer):
     device_id = serializers.CharField(max_length=255)
 
     def validate_device_id(self, value):
         return value.strip()
+
+
+

@@ -116,7 +116,7 @@ class TeamMemberInvite(BaseModel):
     team_member_object = models.ForeignKey(TeamMember, on_delete=models.CASCADE, related_name="invites")
     invited_to = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_team_invites")
     status = models.CharField(max_length=20, choices=TeamMemberStatus.choices, default=TeamMemberStatus.PENDING)
-    show_popup = models.BooleanField(default=False)
+    show_popup = models.BooleanField(default=True)
     expires_at = models.DateTimeField(db_index=True)
     
     def __str__(self):

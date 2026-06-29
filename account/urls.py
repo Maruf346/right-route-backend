@@ -15,7 +15,7 @@ from .views import (
     
     ForgetPasswordView, ResetPasswordView,
     
-    CurrentUserAPIView
+    CurrentUserAPIView, AcceptTeamMemberInvitation
 )
 from .team_views import TeamViewSet
 
@@ -44,6 +44,7 @@ urlpatterns = [
     path("auth/account-delete/", AccountDeleteAPIView.as_view(), name="account-delete",),
     
     path("userinfo/", CurrentUserAPIView.as_view(), name="current-user"),
+    path("team-member-invitation/", AcceptTeamMemberInvitation.as_view(), name="invitation-action"),
     
     path("auth/admin/login/",AdminLoginView.as_view(),name="admin-login"),
     
