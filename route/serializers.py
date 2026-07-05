@@ -73,23 +73,41 @@ class RouteCreateSerializer(serializers.Serializer):
     permit_file = serializers.FileField(required=False)
     permit_text = serializers.CharField(required=False)
     
-    def extract_route_data(self, permit_file):
-        url = "http://16.192.4.30:8001/api/ocr/extract"
+    def extract_route_data(self, permit_file=None, permit_text=None):
+        file_extract_url = "http://16.192.4.30:8001/api/ocr/extract"
+        text_extract_url = "http://16.192.4.30:8001/api/ocr/extract-text"
 
-        permit_file.seek(0)
-        payload = {
-            "file": (
-                permit_file.name,
-                permit_file.read(),
-                permit_file.content_type
+        if permit_file:
+            permit_file.seek(0)
+            payload = {
+                "file": (
+                    permit_file.name,
+                    permit_file.read(),
+                    permit_file.content_type
+                )
+            }
+        elif permit_text:
+            payload = {
+                "text": permit_text
+            }
+        else:
+            raise ValidationError(
+                "Permit file or Permit text must be need."
             )
-        }
+        
         try:
-            response = requests.post(
-                url,
-                files=payload,
-                timeout=30
-            )
+            if permit_file:
+                response = requests.post(
+                    file_extract_url,
+                    files=payload,
+                    timeout=30
+                )
+            elif permit_text:
+                response = requests.post(
+                    text_extract_url,
+                    data=payload,
+                    timeout=30
+                )
             if response.status_code != 200:
                 raise ValidationError(
                     "Documents Extract Failed!"
@@ -121,9 +139,6 @@ class RouteCreateSerializer(serializers.Serializer):
                 "key": settings.GOOGLE_MAP_API_KEY
                 # "key": os.getenv("GOOGLE_MAP_API_KEY")
             }
-            # response = requests.get(url, params=params)
-            # data = response.json()
-            
             response = requests.get(url, params=params)
             AIExtractResponse.objects.create(response_json=str(response))
             data = response.json()
@@ -158,7 +173,7 @@ class RouteCreateSerializer(serializers.Serializer):
     def get_waypoints(self, validated_data, permit, route):
         permit_file = validated_data.get("permit_file", None)
         permit_text = validated_data.get("permit_text", None)
-        route_data = self.extract_route_data(permit_file or permit_text)
+        route_data = self.extract_route_data(permit_file=permit_file, permit_text=permit_text)
         intersection = route_data['intersection'][:-1]
         
         waypoints = self.get_intersection_lat_lng(intersection)
