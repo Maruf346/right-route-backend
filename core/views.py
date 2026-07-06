@@ -162,13 +162,13 @@ class GetStartingWaypointViews(GenericAPIView):
         serializer.is_valid(raise_exception=True)
         location = serializer.validated_data["location"]
         
-        try:
-            graph = ox.graph_from_place(
-                location,
-                network_type="drive"
-            )
-        except:
-            graph = None
+        # try:
+        #     graph = ox.graph_from_place(
+        #         location,
+        #         network_type="drive"
+        #     )
+        # except:
+        #     graph = None
         print("location: ", location)
         
         # result, status = get_lat_lng(location)
@@ -187,7 +187,7 @@ class GetStartingWaypointViews(GenericAPIView):
             {
                 "success": True,
                 "location": location,
-                "point": f"{graph}",
+                # "point": f"{graph}",
                 "lat-lng": result,
                 "Google Maps Link": map_link
             }
