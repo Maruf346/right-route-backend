@@ -10,6 +10,7 @@ import re
 import osmnx as ox
 from shapely.ops import nearest_points
 from shapely.geometry import Point
+from django.conf import settings
 
 def parse_location_string(text):
     """
@@ -101,26 +102,6 @@ def get_lat_lng(location_string):
     except Exception as e:
         return None, f"Error: {str(e)}"
 
-# ==========================================
-# ▶️ ব্যবহার করার নিয়ম (Example Usage):
-# ==========================================
-# if __name__ == "__main__":
-#     # আপনার লোকেশন স্ট্রিং এখানে দিন
-#     location_input = "I-94, 2.8mi NW of Beach"
-    
-#     result, status = get_lat_lng(location_input)
-    
-#     if result:
-#         lat, lng = result
-#         print("\n✅ SUCCESS!")
-#         print(f"📍 Location: {location_input}")
-#         print(f"🌍 Latitude:  {lat:.6f}")
-#         print(f"🌍 Longitude: {lng:.6f}")
-#         print(f"🔗 Google Maps Link: https://www.google.com/maps?q={lat},{lng}")
-#     else:
-#         print(f"\n❌ FAILED: {status}")
-
-
 class GetStartingWaypointViews(GenericAPIView):
     serializer_class = GetStartingWaypiontSerializer
     
@@ -141,7 +122,7 @@ class GetStartingWaypointViews(GenericAPIView):
         url = "https://maps.googleapis.com/maps/api/geocode/json"
         params = {
             "address": location,
-            "key": "AIzaSyCZiZJG8xOhpqNXNhntx1gAxUl0QNK5NyY"
+            "key": settings.GOOGLE_MAP_API_KEY
         }
         response = requests.get(url, params=params)
         print("response: ", response)
