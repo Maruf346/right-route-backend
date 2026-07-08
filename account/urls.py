@@ -12,6 +12,7 @@ from .views import (
     RefreshTokenAPIView,
     LogoutAPIView,
     VerifyTokenAPIView, ChangePasswordView, ResendOTPAPIView, ChangeEmailAPIView, AccountDeleteAPIView,
+    DirectLoginOTPSendView, DirectLoginOTPVerifyView,
     
     ForgetPasswordView, ResetPasswordView,
     
@@ -30,6 +31,8 @@ urlpatterns = [
     path("auth/login/",LoginAPIView.as_view(),name="login"),
     path("auth/create-password/",CreatePasswordAPIView.as_view(),name="create-password"),
     path("auth/verify-otp/",VerifyOTPAPIView.as_view(),name="verify-otp"),
+    path("auth/direct-login/otp-send/", DirectLoginOTPSendView.as_view(), name="direct-login-otp-send"),
+    path("auth/direct-login/otp-verification/", DirectLoginOTPVerifyView.as_view(), name="direct-login-otp-verification"),
     
     path("auth/forget-password/",ForgetPasswordView.as_view(),name="forget-password"),
     path("auth/reset-password/",ResetPasswordView.as_view(),name="reset-password"),

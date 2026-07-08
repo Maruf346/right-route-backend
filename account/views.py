@@ -247,6 +247,71 @@ class ResendOTPAPIView(OwnAPIView):
             status=status.HTTP_200_OK,
         )
 
+# Direct OTP Based Login-------
+class DirectLoginOTPSendView(APIView):
+    def post(self, request, *args, **kwargs) -> Response:
+        try:
+            data = request.data.copy()
+            data["purpose"] = OTPPurpose.LOGIN
+            serializer = ResendOTPSerializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            serializer.resend_otp()
+            return Response(
+                {"success": True, "detail": "OTP send for OTP based login."},
+                status=status.HTTP_200_OK,
+            )
+        except ValidationError:
+            error = {key: str(value[0]) for key, value in serializer.errors.items()}
+            return Response(
+                {
+                    "success": False,
+                    "detail": error
+                }, status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {
+                    "success": False,
+                    "detail": str(e)
+                }, status=status.HTTP_400_BAD_REQUEST
+            )
+
+class DirectLoginOTPVerifyView(APIView):
+    def post(self, request, *args, **kwargs) -> Response:
+        try:
+            data = request.data.copy()
+            data["purpose"] = OTPPurpose.LOGIN
+            serializer = VerifyOTPSerializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            return self.login_response(serializer)
+        except ValidationError:
+            error = {key: str(value[0]) for key, value in serializer.errors.items()}
+            return Response(
+                {"success": False, "detail": error}, status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {"success": False, "detail": str(e)}, status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    def login_response(self, serializer):
+        token = serializer.get_token(self.request)
+        return Response(
+                {
+                    "success": True,
+                    "detail": "Login successful.",
+                    "data": {
+                        "access": str(token.access_token),
+                        "refresh": str(token),
+                        "user": {
+                            "id": serializer.get_user().id,
+                            "email": serializer.get_user().email,
+                        },
+                    },
+                }
+            )
+
+
 # Forget and Reset Password---
 class ForgetPasswordView(OwnAPIView):
     serializer_class = ForgetPasswordSerializer
