@@ -60,7 +60,7 @@ class RouteDetailSerializer(serializers.ModelSerializer):
 
 # Route Create with Permit---
 class RouteCreateSerializer(serializers.Serializer):
-    name = serializers.CharField()
+    name = serializers.CharField(required=False)
     start_location = serializers.CharField()
     start_latitude = serializers.FloatField()
     start_longitude = serializers.FloatField()
@@ -113,10 +113,13 @@ class RouteCreateSerializer(serializers.Serializer):
         team = context["team"]
         
         with transaction.atomic():
+            name = validated_data.get("name", None)
+            if name is None:
+                name = f"{validated_data.get("start_location", "")} to {validated_data.get("end_location", "")}"
             route = Route.objects.create(
                 created_by=request.user,
                 team=team,
-                name=validated_data["name"]
+                name=name
             )
             permit = self.create_permit(validated_data, route)
             PermitWaypoint.objects.bulk_create(self.get_waypoints(validated_data, permit, route))

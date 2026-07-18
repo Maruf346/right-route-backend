@@ -10,7 +10,7 @@ class Route(BaseModel):
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="routes")
     team = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name="routes")
 
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=RouteStatus.choices, default=RouteStatus.DRAFT)
     ai_processing_status = models.CharField(max_length=20, choices=AIProcessingStatus.choices, default=AIProcessingStatus.PENDING)
