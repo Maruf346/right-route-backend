@@ -1,27 +1,12 @@
 from django.urls import path, re_path, include
 from rest_framework.routers import DefaultRouter
-from .admin_views import (
-    AdminLoginView
-)
-from .views import (
-    DeviceInfoView,
-    ContinueAPIView,
-    LoginAPIView,
-    CreatePasswordAPIView,
-    VerifyOTPAPIView,
-    RefreshTokenAPIView,
-    LogoutAPIView,
-    VerifyTokenAPIView, ChangePasswordView, ResendOTPAPIView, ChangeEmailAPIView, AccountDeleteAPIView,
-    DirectLoginOTPSendView, DirectLoginOTPVerifyView,
-    
-    ForgetPasswordView, ResetPasswordView,
-    
-    CurrentUserAPIView, AcceptTeamMemberInvitation
-)
+from .admin_views import *
+from .views import *
 from .team_views import TeamViewSet
 
 router = DefaultRouter()
 router.register(r"team", TeamViewSet, basename="team")
+router.register(r"admin/users", AdminUserViewSet, basename="admin-users")
 
 
 urlpatterns = [
@@ -51,7 +36,7 @@ urlpatterns = [
     
     path("auth/admin/login/",AdminLoginView.as_view(),name="admin-login"),
     
-    # TeamViewSet
+    # TeamViewSet & AdminUserViewSet are registered with the router
     path("", include(router.urls))
 ]
 
