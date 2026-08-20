@@ -7,6 +7,7 @@ from core.constants import OTPPurpose, UserStatus
 from core.permissions import (
     ADMIN_DASHBOARD_PERMISSIONS,
     get_admin_dashboard_permissions,
+    has_admin_dashboard_permission,
 )
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -230,6 +231,23 @@ class AdminUserCreateSerializer(serializers.Serializer):
             attrs["permissions"] = []
         else:
             attrs["permissions"] = attrs.get("permissions", [])
+
+        request = self.context["request"]
+        if not request.user.is_superuser:
+            denied_permissions = [
+                permission
+                for permission in attrs["permissions"]
+                if not has_admin_dashboard_permission(request.user, permission)
+            ]
+            if denied_permissions:
+                raise serializers.ValidationError(
+                    {
+                        "permissions": (
+                            "You cannot grant permissions you do not have: "
+                            f"{', '.join(denied_permissions)}"
+                        )
+                    }
+                )
         return attrs
 
     def create(self, validated_data):
@@ -283,6 +301,24 @@ class AdminUserUpdateSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs.get("is_superadmin") is True:
             attrs["permissions"] = []
+
+        request = self.context["request"]
+        submitted_permissions = attrs.get("permissions", [])
+        if not request.user.is_superuser:
+            denied_permissions = [
+                permission
+                for permission in submitted_permissions
+                if not has_admin_dashboard_permission(request.user, permission)
+            ]
+            if denied_permissions:
+                raise serializers.ValidationError(
+                    {
+                        "permissions": (
+                            "You cannot grant permissions you do not have: "
+                            f"{', '.join(denied_permissions)}"
+                        )
+                    }
+                )
         return attrs
 
     def update(self, instance, validated_data):
@@ -347,6 +383,20 @@ class AdminUserUpdateResponseSerializer(serializers.Serializer):
 class AdminUserDeleteResponseSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     message = serializers.CharField()
+
+
+class AdminUserBulkDeleteSerializer(serializers.Serializer):
+    admin_user_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        allow_empty=False,
+    )
+
+
+class AdminUserBulkDeleteResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    deleted_count = serializers.IntegerField()
+    skipped = serializers.ListField(child=serializers.DictField())
 
 
 class AdminUserAccessResponseSerializer(serializers.Serializer):

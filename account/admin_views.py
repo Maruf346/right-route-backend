@@ -19,7 +19,7 @@ from drf_spectacular.utils import (
 )
 from .admin_serializers import *
 from core.constants import LogStatus, NotifyLogAction, UserStatus, UserType
-from core.permissions import IsSuperAdminUser
+from core.permissions import HasAdminDashboardPermission
 from notification.models import ActivityLog
 from .utils import OwnAPIView
 
@@ -115,7 +115,7 @@ class AdminLoginView(OwnAPIView):
 )
 class AdminUserViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
-    permission_classes = [IsAuthenticated, IsSuperAdminUser]
+    permission_classes = [IsAuthenticated, HasAdminDashboardPermission]
     serializer_class = AdminUserSerializer
     queryset = User.objects.filter(
         user_type=UserType.ADMIN,
@@ -138,6 +138,13 @@ class AdminUserViewSet(viewsets.ModelViewSet):
             return AdminUserUpdateSerializer
         return AdminUserSerializer
 
+    def get_required_admin_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return ["admin_users.list"]
+        if self.action == "create":
+            return ["admin_users.add"]
+        return ["admin_users"]
+
     def log_admin_action(self, action, target_user, message, metadata=None):
         ActivityLog.objects.create(
             user=self.request.user,
@@ -154,18 +161,37 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     def serialize_admin_user(self, user):
         return AdminUserSerializer(user, context={"request": self.request}).data
 
+    def get_target_access_error(self, target_user, action):
+        protected_actions = ["update", "delete", "lock", "unlock"]
+        if (
+            action in protected_actions
+            and target_user.is_superuser
+            and not self.request.user.is_superuser
+        ):
+            return (
+                "Only a superadmin can manage another superadmin.",
+                status.HTTP_403_FORBIDDEN,
+            )
+
+        if action in ["delete", "lock"] and target_user.id == self.request.user.id:
+            return (
+                f"A superadmin cannot {action} themselves.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        return None
+
     @extend_schema(
         operation_id="admin_user_list",
         summary="List admin users",
         description=(
-            "Returns admin dashboard users. Only authenticated superadmins can access this endpoint."
+            "Returns admin dashboard users. Requires `admin_users.list` or `admin_users` permission."
         ),
         responses={
             200: OpenApiResponse(
                 response=AdminUserListResponseSerializer,
                 description="Admin user list retrieved successfully.",
             ),
-            403: OpenApiResponse(description="Super admin access required."),
+            403: OpenApiResponse(description="Admin dashboard permission required."),
         },
     )
     def list(self, request, *args, **kwargs):
@@ -194,12 +220,22 @@ class AdminUserViewSet(viewsets.ModelViewSet):
                 description="Admin user created successfully.",
             ),
             400: OpenApiResponse(description="Admin user validation failed."),
-            403: OpenApiResponse(description="Super admin access required."),
+            403: OpenApiResponse(description="Admin dashboard permission required."),
         },
     )
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+
+        if serializer.validated_data.get("is_superadmin") is True and not request.user.is_superuser:
+            return Response(
+                {
+                    "success": False,
+                    "detail": "Only a superadmin can create another superadmin.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         user = serializer.save()
         self.log_admin_action(
             NotifyLogAction.CREATE,
@@ -220,19 +256,27 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         operation_id="admin_user_retrieve",
         summary="Retrieve admin user",
         description=(
-            "Returns details for one admin dashboard user by ID. Only authenticated superadmins can access this endpoint."
+            "Returns details for one admin dashboard user by ID. Requires `admin_users.list` or `admin_users` permission."
         ),
         responses={
             200: OpenApiResponse(
                 response=AdminUserRetrieveResponseSerializer,
                 description="Admin user details retrieved successfully.",
             ),
-            403: OpenApiResponse(description="Super admin access required."),
+            403: OpenApiResponse(description="Admin dashboard permission required."),
             404: OpenApiResponse(description="Admin user not found."),
         },
     )
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
+        access_error = self.get_target_access_error(instance, "retrieve")
+        if access_error:
+            message, response_status = access_error
+            return Response(
+                {"success": False, "detail": message},
+                status=response_status,
+            )
+
         serializer = self.get_serializer(instance)
         return Response(
             {
@@ -261,13 +305,12 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     )
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.id == request.user.id and request.data.get("is_superadmin") is False:
+        access_error = self.get_target_access_error(instance, "update")
+        if access_error:
+            message, response_status = access_error
             return Response(
-                {
-                    "success": False,
-                    "detail": "A superadmin cannot remove their own superadmin access.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+                {"success": False, "detail": message},
+                status=response_status,
             )
 
         serializer = self.get_serializer(
@@ -277,6 +320,25 @@ class AdminUserViewSet(viewsets.ModelViewSet):
             context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
+
+        if serializer.validated_data.get("is_superadmin") is True and not request.user.is_superuser:
+            return Response(
+                {
+                    "success": False,
+                    "detail": "Only a superadmin can grant superadmin access.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if instance.id == request.user.id and serializer.validated_data.get("is_superadmin") is False:
+            return Response(
+                {
+                    "success": False,
+                    "detail": "A superadmin cannot remove their own superadmin access.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         user = serializer.save()
         self.log_admin_action(
             NotifyLogAction.UPDATE,
@@ -306,19 +368,18 @@ class AdminUserViewSet(viewsets.ModelViewSet):
                 description="Admin user deleted successfully.",
             ),
             400: OpenApiResponse(description="A superadmin cannot delete themselves."),
-            403: OpenApiResponse(description="Super admin access required."),
+            403: OpenApiResponse(description="Admin dashboard permission required."),
             404: OpenApiResponse(description="Admin user not found."),
         },
     )
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.id == request.user.id:
+        access_error = self.get_target_access_error(instance, "delete")
+        if access_error:
+            message, response_status = access_error
             return Response(
-                {
-                    "success": False,
-                    "detail": "A superadmin cannot delete themselves.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+                {"success": False, "detail": message},
+                status=response_status,
             )
 
         target_email = instance.email
@@ -339,6 +400,69 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         )
 
     @extend_schema(
+        operation_id="admin_user_bulk_delete",
+        summary="Bulk delete admin users",
+        description=(
+            "Deletes selected admin dashboard users. Self-deletion is blocked, and non-superadmins "
+            "cannot delete superadmins."
+        ),
+        request=AdminUserBulkDeleteSerializer,
+        responses={
+            200: OpenApiResponse(
+                response=AdminUserBulkDeleteResponseSerializer,
+                description="Bulk delete completed.",
+            ),
+            400: OpenApiResponse(description="Bulk delete validation failed."),
+            403: OpenApiResponse(description="Admin dashboard permission required."),
+        },
+    )
+    @action(detail=False, methods=["post"], url_path="bulk-delete")
+    def bulk_delete(self, request):
+        serializer = AdminUserBulkDeleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        admin_user_ids = serializer.validated_data["admin_user_ids"]
+        queryset = self.get_queryset().filter(id__in=admin_user_ids)
+        found_ids = set(queryset.values_list("id", flat=True))
+        skipped = [
+            {"id": admin_user_id, "reason": "Admin user not found."}
+            for admin_user_id in admin_user_ids
+            if admin_user_id not in found_ids
+        ]
+        deleted_count = 0
+
+        for target_user in queryset:
+            access_error = self.get_target_access_error(target_user, "delete")
+            if access_error:
+                message, _ = access_error
+                skipped.append({"id": target_user.id, "reason": message})
+                continue
+
+            target_email = target_user.email
+            target_is_superadmin = target_user.is_superuser
+            self.log_admin_action(
+                NotifyLogAction.DELETE,
+                target_user,
+                "Admin user deleted in bulk.",
+                {
+                    "target_email": target_email,
+                    "is_superadmin": target_is_superadmin,
+                },
+            )
+            target_user.delete()
+            deleted_count += 1
+
+        return Response(
+            {
+                "success": True,
+                "message": f"{deleted_count} admin user(s) deleted successfully.",
+                "deleted_count": deleted_count,
+                "skipped": skipped,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
         operation_id="admin_user_lock",
         summary="Lock admin user",
         description="Locks an admin user out of the dashboard by setting `is_active=false`.",
@@ -353,13 +477,12 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="lock")
     def lock(self, request, pk=None):
         instance = self.get_object()
-        if instance.id == request.user.id:
+        access_error = self.get_target_access_error(instance, "lock")
+        if access_error:
+            message, response_status = access_error
             return Response(
-                {
-                    "success": False,
-                    "detail": "A superadmin cannot lock themselves.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+                {"success": False, "detail": message},
+                status=response_status,
             )
 
         instance.is_active = False
@@ -394,6 +517,14 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="unlock")
     def unlock(self, request, pk=None):
         instance = self.get_object()
+        access_error = self.get_target_access_error(instance, "unlock")
+        if access_error:
+            message, response_status = access_error
+            return Response(
+                {"success": False, "detail": message},
+                status=response_status,
+            )
+
         instance.is_active = True
         instance.status = UserStatus.ACTIVE
         instance.save(update_fields=["is_active", "status", "updated_at"])

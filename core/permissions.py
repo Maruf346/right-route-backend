@@ -52,6 +52,21 @@ def get_admin_dashboard_permissions(user):
     profile = getattr(user, "admin_profile", None)
     return profile.permissions_json if profile else []
 
+
+def has_admin_dashboard_permission(user, required_permissions):
+    if isinstance(required_permissions, str):
+        required_permissions = [required_permissions]
+
+    user_permissions = set(get_admin_dashboard_permissions(user))
+    for permission in required_permissions:
+        if permission in user_permissions:
+            return True
+
+        parent_permission = permission.split(".")[0]
+        if parent_permission in user_permissions:
+            return True
+    return False
+
 class IsAdminUserPermission(BasePermission):
     def has_permission(self, request, view):
         return bool(
@@ -74,8 +89,11 @@ class HasAdminDashboardPermission(BasePermission):
     message = "Admin dashboard permission required."
 
     def has_permission(self, request, view):
-        required_permission = getattr(view, "required_admin_permission", None)
-        if required_permission is None:
-            return is_admin_dashboard_user(request.user)
-        return required_permission in get_admin_dashboard_permissions(request.user)
+        if hasattr(view, "get_required_admin_permissions"):
+            required_permission = view.get_required_admin_permissions()
+        else:
+            required_permission = getattr(view, "required_admin_permission", None)
 
+        if not required_permission:
+            return is_admin_dashboard_user(request.user)
+        return has_admin_dashboard_permission(request.user, required_permission)
