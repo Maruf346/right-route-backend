@@ -112,8 +112,7 @@ No existing view, URL, serializer, model, or migration may be modified without t
 
 | Method | URL | Description |
 |---|---|---|
-| POST | `/api/v1/supports/webhook/create-ticket/` | Public POST endpoint for website WPForms webhook |
-| POST | `/api/v1/supports/website-form/` | Public alias endpoint for website form submission |
+| POST | `/api/v1/supports/website/submit` | Public POST endpoint for website WPForms webhook |
 | GET | `/api/v1/supports/tickets/` | List tickets (`?scope=live\|archived\|draft`, filter by category, subcategory, priority, plan_type, assigned_to, search) |
 | POST | `/api/v1/supports/tickets/` | Create ticket or save draft in dashboard |
 | GET | `/api/v1/supports/tickets/{id}/` | Full ticket detail (auto-refreshes NEW → OPEN after 3h) |
@@ -133,6 +132,35 @@ No existing view, URL, serializer, model, or migration may be modified without t
 
 ---
 
+### `finance` app — ✅ COMPLETE
+**Purpose:** Financial tracking & reporting for Admin Dashboard (Subscription Payments, Fleet Payments, Expenses tracking, and Excel export).
+**Source spec:** `docs/admin_dashboard/05 Income Expenses section.pdf`
+**Permissions required:**
+- `income_expenses.subscription_payments`
+- `income_expenses.fleet_payments`
+- `income_expenses.expenses`
+**Swagger tag:** `Finance - Income & Expenses`
+
+**Models:**
+- `Expense` — recorded business expenses with vendor name, payment date, amount, payer, payment method, recurring flag, and description.
+
+**APIs:**
+
+| Method | URL | Description |
+|---|---|---|
+| GET | `/api/v1/finance/subscription-payments/summary/` | Orange bar expected subscription revenue (Day / Month / Year) |
+| GET | `/api/v1/finance/fleet-payments/summary/` | Orange bar expected fleet revenue (Day / Month / Year) (Stub/TODO) |
+| GET | `/api/v1/finance/fleet-payments/list/` | Paginated fleet plans list due in period (Stub/TODO) |
+| GET | `/api/v1/finance/expenses/summary/` | Orange bar total recorded expenses (Day / Month / Year) |
+| GET | `/api/v1/finance/expenses/` | List expenses (filterable by date, date range, vendor, payer, method, search) |
+| POST | `/api/v1/finance/expenses/` | Add New Expense |
+| GET | `/api/v1/finance/expenses/{id}/` | Expense Log detail view |
+| PATCH | `/api/v1/finance/expenses/{id}/` | Edit Expense |
+| DELETE | `/api/v1/finance/expenses/{id}/` | Delete Expense |
+| GET | `/api/v1/finance/expenses/download/` | Download styled `.xlsx` Excel spreadsheet of expenses |
+
+---
+
 ## Admin Dashboard PDFs (Source Specs)
 
 Located in `docs/admin_dashboard/`. Each PDF describes a section of the admin dashboard.
@@ -144,7 +172,7 @@ Located in `docs/admin_dashboard/`. Each PDF describes a section of the admin da
 | `02 Subscription section.pdf` | Not started | Subscription management |
 | `03 Coupons section.pdf` | Not started | Coupon/discount code management |
 | `04 User Account section.pdf` | Not started | User account management |
-| `05 Income Expenses section.pdf` | Not started | Income & expenses |
+| `05 Income Expenses section.pdf` | ✅ **COMPLETE** | `finance` app |
 | `06 Revenue section.pdf` | Not started | Revenue reporting |
 | `07 Support Tools - Support tickets section.pdf` | ✅ **COMPLETE** | `supports` app |
 | `07 Support Tools - User-Staff Resources section.pdf` | Not started | Resource management |
