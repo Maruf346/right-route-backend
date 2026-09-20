@@ -161,6 +161,37 @@ No existing view, URL, serializer, model, or migration may be modified without t
 
 ---
 
+### `analytics` app — ✅ COMPLETE
+**Purpose:** Revenue Metrics & Analytics Dashboard (7 core metrics, Revenue Mix donut chart, Revenue by Plan bar chart, Plan Performance table).
+**Source spec:** `docs/admin_dashboard/06 Revenue section.pdf`
+**Permission required:** `reporting_analytics.revenue_metrics`
+**Swagger tag:** `Reporting & Analytics - Revenue`
+
+**APIs:**
+
+| Method | URL | Description |
+|---|---|---|
+| GET | `/api/v1/analytics/revenue/dashboard/` | Consolidated dashboard response (selectors, 7 metrics, mix chart, plan chart, performance table) |
+| GET | `/api/v1/analytics/revenue/metrics/` | 7 Core Metrics cards (Active Paying Accounts, MRR, ARR, ARPA, New MRR, Churned MRR, Total Revenue) |
+| GET | `/api/v1/analytics/revenue/mix/` | Revenue Mix by Customer Type (Single, Team, Fleet + center ARR) |
+| GET | `/api/v1/analytics/revenue/by-plan/` | Revenue by Plan horizontal bar chart dataset sorted highest to lowest |
+| GET | `/api/v1/analytics/revenue/plan-performance/` | Plan performance table rows + calculated Total row |
+| GET | `/api/v1/analytics/revenue/time-periods/` | Dropdown options for Quarters (2 years) and Years (4 years) |
+
+---
+
+## Future Fleet Plan Integration Guide (When Fleet Plans are Added)
+
+When dedicated Fleet Plan models / contracts are implemented in the project:
+1. **`finance` app**:
+   - In [`finance/utils.py`](file:///c:/Users/maruf/Projects/right-route-backend/finance/utils.py), update `calculate_fleet_revenue()` to query the new fleet billing model.
+   - In [`finance/views.py`](file:///c:/Users/maruf/Projects/right-route-backend/finance/views.py), update `FleetPaymentsListView` to populate invoice schedule / due date data from fleet contracts.
+2. **`analytics` app**:
+   - In [`analytics/utils.py`](file:///c:/Users/maruf/Projects/right-route-backend/analytics/utils.py), update `calculate_fleet_mrr()` and `calculate_active_paying_accounts()` to include fleet contracts.
+   - The Revenue Mix, Revenue by Plan, and Plan Performance tables will automatically reflect fleet contracts with zero changes needed to endpoint schemas.
+
+---
+
 ## Admin Dashboard PDFs (Source Specs)
 
 Located in `docs/admin_dashboard/`. Each PDF describes a section of the admin dashboard.
@@ -173,7 +204,7 @@ Located in `docs/admin_dashboard/`. Each PDF describes a section of the admin da
 | `03 Coupons section.pdf` | Not started | Coupon/discount code management |
 | `04 User Account section.pdf` | Not started | User account management |
 | `05 Income Expenses section.pdf` | ✅ **COMPLETE** | `finance` app |
-| `06 Revenue section.pdf` | Not started | Revenue reporting |
+| `06 Revenue section.pdf` | ✅ **COMPLETE** | `analytics` app |
 | `07 Support Tools - Support tickets section.pdf` | ✅ **COMPLETE** | `supports` app |
 | `07 Support Tools - User-Staff Resources section.pdf` | Not started | Resource management |
 | `08 Security - Audit Logs section.pdf` | Not started | Audit log viewer |
