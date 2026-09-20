@@ -34,7 +34,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     
     # custom app
-    'account', 'core', 'notification', 'route', 'subscription', 'security',
+    'account', 'core', 'notification', 'route', 'subscription', 'security', 'supports',
 ]
 
 

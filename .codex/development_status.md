@@ -94,12 +94,42 @@ No existing view, URL, serializer, model, or migration may be modified without t
 | POST | `/api/v1/security/data-protection/{id}/send-completion-email/` | Send completion email + close |
 | GET | `/api/v1/security/data-protection/download/{token}/` | Secure ZIP download |
 
-**Known TODOs inside the code (pending from developer):**
-- `_perform_delete()` — needs retention category list before full implementation
-- `_perform_anonymize()` — same
-- `_perform_delete_anonymize()` — same
-- Billing dispute warning in `get_warnings()` — needs billing dispute model
-- Export data categories — only profile data exported now; full list pending
+---
+
+### `supports` app — ✅ COMPLETE
+**Purpose:** Support ticket system for Website integration (WPForms on getrightroute.app) and Admin Dashboard ticket management.
+**Source spec:** `docs/admin_dashboard/07 Support Tools - Support tickets section.pdf`
+**Permission required:** `support_tools.support_tickets`
+**Swagger tag:** `Support - Tickets`
+
+**Models:**
+- `SupportTicket` — ticket records with sequential `RR-YYYY-00001` numbering, duplicate prevention via `form_submission_id`, auto priority rules, dynamic customer account matching, and live/archived/draft lifecycle.
+- `TicketAttachment` — attachment files with 3MB limits, restricted extensions, and ClamAV malware scanning.
+- `TicketMessage` — conversation thread (customer replies, staff responses, internal notes, system logs).
+- `TicketActivityLog` — session audit history.
+
+**APIs:**
+
+| Method | URL | Description |
+|---|---|---|
+| POST | `/api/v1/supports/webhook/create-ticket/` | Public POST endpoint for website WPForms webhook |
+| POST | `/api/v1/supports/website-form/` | Public alias endpoint for website form submission |
+| GET | `/api/v1/supports/tickets/` | List tickets (`?scope=live\|archived\|draft`, filter by category, subcategory, priority, plan_type, assigned_to, search) |
+| POST | `/api/v1/supports/tickets/` | Create ticket or save draft in dashboard |
+| GET | `/api/v1/supports/tickets/{id}/` | Full ticket detail (auto-refreshes NEW → OPEN after 3h) |
+| PATCH | `/api/v1/supports/tickets/{id}/` | Update ticket fields |
+| DELETE | `/api/v1/supports/tickets/{id}/` | Permanently delete ticket |
+| GET | `/api/v1/supports/tickets/stats/` | Live tickets count + archived tickets count |
+| GET | `/api/v1/supports/tickets/drafts/` | List all saved drafts |
+| POST | `/api/v1/supports/tickets/{id}/archive/` | Move ticket to archives (sets status=CLOSED) |
+| POST | `/api/v1/supports/tickets/{id}/assign/` | Assign ticket to admin agent & send email |
+| POST | `/api/v1/supports/tickets/{id}/clone/` | Clone ticket content into new ticket |
+| POST | `/api/v1/supports/tickets/{id}/messages/` | Add customer response (sends email) or internal note |
+| POST | `/api/v1/supports/tickets/{id}/attachments/` | Upload attachment with validation & virus scan |
+| GET | `/api/v1/supports/tickets/attachments/{id}/download/` | Securely download attachment |
+| GET | `/api/v1/supports/tickets/{id}/related/` | Get list of similar open tickets |
+| GET | `/api/v1/supports/assignees/` | Dynamic list of assignees from AdminUserProfile |
+| GET | `/api/v1/supports/customers/search/` | Search users to auto-populate ticket creation form |
 
 ---
 
@@ -116,7 +146,7 @@ Located in `docs/admin_dashboard/`. Each PDF describes a section of the admin da
 | `04 User Account section.pdf` | Not started | User account management |
 | `05 Income Expenses section.pdf` | Not started | Income & expenses |
 | `06 Revenue section.pdf` | Not started | Revenue reporting |
-| `07 Support Tools - Support tickets section.pdf` | Not started | Support ticket system |
+| `07 Support Tools - Support tickets section.pdf` | ✅ **COMPLETE** | `supports` app |
 | `07 Support Tools - User-Staff Resources section.pdf` | Not started | Resource management |
 | `08 Security - Audit Logs section.pdf` | Not started | Audit log viewer |
 | `08 Security - Data Protection section.pdf` | ✅ **COMPLETE** | `security` app |
