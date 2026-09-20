@@ -19,7 +19,7 @@ from django.db.models import Q
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 
 
-@extend_schema(tags=["Admin - Subscription Plans"])
+@extend_schema(tags=["Subscription Plans - Admin"])
 class SubscriptionPlanViewSet(OwnModelViewSet):
     serializer_class = SubscriptionPlanSerializer
     permission_classes = [IsAuthenticated, IsAdminUserPermission]
@@ -264,7 +264,7 @@ class AdminSubscriberBaseViewSet(viewsets.GenericViewSet):
         return self.set_locked_status(False)
 
 
-@extend_schema(tags=["Admin - Subscribers - Single"])
+@extend_schema(tags=["Subscribers - Single - Admin"])
 class AdminSingleSubscriberViewSet(AdminSubscriberBaseViewSet):
     serializer_class = AdminSubscriberSerializer
     update_serializer_class = AdminSingleSubscriberUpdateSerializer
@@ -343,7 +343,7 @@ class AdminSingleSubscriberViewSet(AdminSubscriberBaseViewSet):
         return super().unlock(request, pk=pk)
 
 
-@extend_schema(tags=["Admin - Subscribers - Teams"])
+@extend_schema(tags=["Subscribers - Teams - Admin"])
 class AdminTeamSubscriberViewSet(AdminSubscriberBaseViewSet):
     serializer_class = AdminTeamSubscriberSerializer
     update_serializer_class = AdminTeamSubscriberUpdateSerializer

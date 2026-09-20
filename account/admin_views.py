@@ -111,7 +111,7 @@ class AdminLoginView(OwnAPIView):
 
 
 @extend_schema(
-    tags=["Admin - User Management"],
+    tags=["User Management -  Admin"],
 )
 class AdminUserViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]

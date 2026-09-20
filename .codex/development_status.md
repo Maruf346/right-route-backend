@@ -14,7 +14,7 @@ No existing view, URL, serializer, model, or migration may be modified without t
 
 **Admin dashboard APIs** (`account/admin_views.py`):
 - `AdminLoginView` — two-step login (password → OTP) — tag: `Auth - Admin`
-- `AdminUserViewSet` — full CRUD for dashboard admin users (lock/unlock/bulk-delete) — tag: `Admin - User Management`
+- `AdminUserViewSet` — full CRUD for dashboard admin users (lock/unlock/bulk-delete) — tag: `User Management - Admin`
 
 **Regular user APIs** (`account/views.py`):
 - Register / login (OTP-based) / logout / refresh token / verify token

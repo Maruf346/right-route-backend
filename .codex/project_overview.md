@@ -79,7 +79,7 @@ security_logging_compliance / security_logging_compliance.audit_logs / security_
 ### Swagger Tags Convention
 Tags are formatted as `"Section - Subsection"`, for example:
 - `"Auth - Admin"`, `"Auth - User"`
-- `"Admin - User Management"`
+- `"User Management - Admin"`
 - `"Security - Data Protection"`, `"Security - Audit Logs"`
 
 All new views **must** use `@extend_schema(tags=[...])` or `@extend_schema_view(...)`.
