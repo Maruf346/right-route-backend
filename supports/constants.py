@@ -20,9 +20,19 @@ class TicketPriority(models.TextChoices):
 
 class TicketSource(models.TextChoices):
     WEBSITE_FORM = "WEBSITE_FORM", "Website Support Form"
+    TEAM_DASHBOARD = "TEAM_DASHBOARD", "Team Dashboard Support Form"
     DASHBOARD = "DASHBOARD", "Ticket Creator in Dashboard"
     STAFF_DISCOVERED = "STAFF_DISCOVERED", "Staff-discovered"
     AUTOMATED_ALERT = "AUTOMATED_ALERT", "Automated system alert"
+
+
+class SupportPlatform(models.TextChoices):
+    IPHONE = "iPhone", "iPhone"
+    IPOD = "iPod", "iPod"
+    ANDROID_PHONE = "Android Phone", "Android Phone"
+    ANDROID_TABLET = "Android Tablet", "Android Tablet"
+    WEB_DASHBOARD = "Web Dashboard", "Web Dashboard"
+    OTHER = "Other", "Other"
 
 
 class ContactMethod(models.TextChoices):
@@ -37,6 +47,17 @@ class PlanType(models.TextChoices):
     TEAM = "TEAM", "Team"
     FLEET = "FLEET", "Fleet"
     TRIAL = "TRIAL", "Trial User"
+
+
+# Support Contact Information as specified in 02 Team dash support section.pdf
+SUPPORT_CONTACT_PHONE = "888-603-6317"
+SUPPORT_CONTACT_EMAILS = {
+    "technical_issues": "help@getrightroute.app",
+    "subscription_help": "service@getrightroute.app",
+    "fleet_sales": "sales@getrightroute.app",
+    "legal": "legal@getrightroute.app",
+}
+SUPPORT_NOTIFICATION_EMAIL = "help@getrightroute.app"
 
 
 class MainCategory(models.TextChoices):

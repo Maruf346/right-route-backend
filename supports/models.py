@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from core.common_models import BaseModel
-from account.models import User
+from account.models import User, Team
 from supports.constants import (
     ContactMethod,
     MainCategory,
@@ -60,6 +60,13 @@ class SupportTicket(BaseModel):
     account_email = models.EmailField(max_length=255, blank=True, null=True)
     customer_user = models.ForeignKey(
         User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="support_tickets",
+    )
+    team = models.ForeignKey(
+        Team,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -256,3 +263,46 @@ class TicketActivityLog(BaseModel):
 
     def __str__(self):
         return f"{self.ticket.ticket_number}: {self.action_summary}"
+
+
+class SupportResource(BaseModel):
+    """
+    Helpful resources (guides, manuals, promo videos, contract templates)
+    available for team users and customers to search and download.
+    Managed by admins in the dashboard.
+    """
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    file = models.FileField(upload_to="support_resources/")
+    file_name = models.CharField(max_length=255, blank=True, null=True)
+    file_size = models.PositiveIntegerField(default=0, help_text="File size in bytes")
+    file_type = models.CharField(max_length=50, blank=True, null=True)
+    category = models.CharField(max_length=100, blank=True, null=True, default="General")
+    download_count = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_support_resources",
+    )
+
+    class Meta:
+        ordering = ["title"]
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        if self.file and not self.file_name:
+            self.file_name = os.path.basename(self.file.name)
+        if self.file and not self.file_size:
+            try:
+                self.file_size = self.file.size
+            except Exception:
+                pass
+        if self.file_name and not self.file_type:
+            self.file_type = self.file_name.split(".")[-1].lower()
+        super().save(*args, **kwargs)
+

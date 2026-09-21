@@ -23,15 +23,37 @@ def is_team_dashboard_user(user):
 
 def get_team_for_user(user):
     """
-    Returns the active Team object for a user (as team admin or owner).
+    Returns the active Team object for a user (as team admin, member, or owner).
     """
-    # Prioritize explicit team admin profile if assigned
-    profile = getattr(user, "team_admin_profile", None)
-    if profile and profile.is_active and profile.team.is_active:
-        return profile.team
+    if not (user and user.is_authenticated):
+        return None
 
-    if hasattr(user, "owned_team") and user.owned_team.is_active:
-        return user.owned_team
+    # Prioritize explicit team admin profile if assigned
+    try:
+        profile = getattr(user, "team_admin_profile", None)
+        if profile and profile.is_active and profile.team and profile.team.is_active:
+            return profile.team
+    except Exception:
+        pass
+
+    # Check if user owns a team
+    try:
+        if hasattr(user, "owned_team") and user.owned_team and user.owned_team.is_active:
+            return user.owned_team
+    except Exception:
+        pass
+
+    # Direct query fallback for owner
+    from account.models import Team
+    team = Team.objects.filter(owner=user, is_active=True).first()
+    if team:
+        return team
+
+    # Check team membership (driver)
+    from account.models import TeamMember
+    member = TeamMember.objects.filter(user=user, team__is_active=True).first()
+    if member:
+        return member.team
 
     return None
 

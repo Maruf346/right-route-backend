@@ -12,19 +12,29 @@ from django.utils import timezone
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes
 
 from core.permissions import HasAdminDashboardPermission
-from account.models import User, AdminUserProfile
+from account.models import User, AdminUserProfile, Team
+from team_dashboard.permissions import (
+    IsTeamDashboardUser,
+    HasTeamDashboardPermission,
+    get_team_for_user,
+)
 from supports.constants import (
     MainCategory,
     TicketPriority,
     TicketSource,
     TicketStatus,
     PlanType,
+    SUPPORT_CONTACT_PHONE,
+    SUPPORT_CONTACT_EMAILS,
+    SUBCATEGORIES,
+    CATEGORY_ABBREVIATIONS,
 )
 from supports.models import (
     SupportTicket,
     TicketAttachment,
     TicketMessage,
     TicketActivityLog,
+    SupportResource,
 )
 from supports.serializers import (
     SupportTicketListSerializer,
@@ -38,6 +48,12 @@ from supports.serializers import (
     AssigneeOptionSerializer,
     CustomerSearchResultSerializer,
     RelatedTicketSerializer,
+    TeamContactInfoSerializer,
+    TeamTopicsDictionarySerializer,
+    TeamTicketPrefillSerializer,
+    TeamSubmitTicketSerializer,
+    SupportResourceSerializer,
+    SupportResourceAdminCreateUpdateSerializer,
 )
 from supports.utils import (
     generate_ticket_number,
@@ -58,7 +74,7 @@ class StandardResultsSetPagination(PageNumberPagination):
 
 @extend_schema_view(
     list=extend_schema(
-        tags=["Support - Tickets"],
+        tags=["Support - Admin"],
         summary="List support tickets (Live or Archived)",
         parameters=[
             OpenApiParameter("scope", OpenApiTypes.STR, description="Filter scope: 'live' (default), 'archived', or 'draft'"),
@@ -71,23 +87,23 @@ class StandardResultsSetPagination(PageNumberPagination):
         ],
     ),
     retrieve=extend_schema(
-        tags=["Support - Tickets"],
+        tags=["Support - Admin"],
         summary="Get full support ticket details",
     ),
     create=extend_schema(
-        tags=["Support - Tickets"],
+        tags=["Support - Admin"],
         summary="Create a new support ticket or draft from Admin Dashboard",
     ),
     update=extend_schema(
-        tags=["Support - Tickets"],
+        tags=["Support - Admin"],
         summary="Update ticket status, priority, assignment, etc.",
     ),
     partial_update=extend_schema(
-        tags=["Support - Tickets"],
+        tags=["Support - Admin"],
         summary="Update ticket status, priority, assignment, etc.",
     ),
     destroy=extend_schema(
-        tags=["Support - Tickets"],
+        tags=["Support - Admin"],
         summary="Permanently delete a support ticket",
     ),
 )
@@ -164,7 +180,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Get count of Live and Archived support tickets",
     responses={200: TicketStatsSerializer},
 )
@@ -188,7 +204,7 @@ class TicketStatsView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Archive a support ticket (moves to archive and sets status=Closed)",
     responses={200: SupportTicketDetailSerializer},
 )
@@ -212,7 +228,7 @@ class TicketArchiveView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Assign a support ticket to an admin agent",
     request={
         "application/json": {
@@ -258,7 +274,7 @@ class TicketAssignView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Clone an archived ticket into a new ticket draft or live ticket",
     responses={201: SupportTicketDetailSerializer},
 )
@@ -304,7 +320,7 @@ class TicketCloneView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Add a message or internal note to a ticket thread",
     request={
         "application/json": {
@@ -356,7 +372,7 @@ class TicketMessagesView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Upload an attachment to a ticket",
     responses={201: TicketAttachmentSerializer},
 )
@@ -393,7 +409,7 @@ class TicketAttachmentsView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Download an attachment safely",
 )
 class TicketAttachmentDownloadView(APIView):
@@ -410,7 +426,7 @@ class TicketAttachmentDownloadView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Get related open tickets",
     responses={200: RelatedTicketSerializer(many=True)},
 )
@@ -435,7 +451,7 @@ class TicketRelatedView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Get list of all draft tickets",
     responses={200: SupportTicketListSerializer(many=True)},
 )
@@ -450,7 +466,7 @@ class TicketDraftListView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Get list of admin users for assignee dropdown",
     responses={200: AssigneeOptionSerializer(many=True)},
 )
@@ -471,7 +487,7 @@ class AssigneeListView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Admin"],
     summary="Search customer accounts to auto-fill Create Ticket form",
     parameters=[
         OpenApiParameter("q", OpenApiTypes.STR, description="Search query by name or email"),
@@ -513,7 +529,7 @@ class CustomerSearchView(APIView):
 
 
 @extend_schema(
-    tags=["Support - Tickets"],
+    tags=["Support - Public / Webhook"],
     summary="Public endpoint: Create support ticket from Website WPForms",
     request=WebsiteTicketCreateSerializer,
     responses={
@@ -548,3 +564,286 @@ class WebsiteTicketCreateView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+# ==============================================================================
+# ── TEAM DASHBOARD SUPPORT VIEWS ─────────────────────────────────────────────
+# ==============================================================================
+
+
+@extend_schema(
+    tags=["Support - Team"],
+    summary="Get RightRoute support contact information",
+    description="Returns support phone numbers and dedicated department emails (Technical, Subscription, Fleet, Legal).",
+    responses={200: TeamContactInfoSerializer},
+)
+class TeamContactInfoView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "support.contact_support"
+
+    def get(self, request):
+        data = {
+            "phone": SUPPORT_CONTACT_PHONE,
+            "emails": {
+                "technical_issues": SUPPORT_CONTACT_EMAILS["technical_issues"],
+                "subscription_help": SUPPORT_CONTACT_EMAILS["subscription_help"],
+                "fleet_sales": SUPPORT_CONTACT_EMAILS["fleet_sales"],
+                "legal": SUPPORT_CONTACT_EMAILS["legal"],
+            },
+        }
+        return Response(data, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=["Support - Team"],
+    summary="Get support ticket topic categories and subtopics dictionary",
+    description="Returns all 10 main categories and their nested subtopics for the Submit Ticket form.",
+    responses={200: TeamTopicsDictionarySerializer},
+)
+class TeamTopicsDictionaryView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "support.submit_ticket"
+
+    def get(self, request):
+        topic_list = []
+        for choice in MainCategory.choices:
+            key = choice[0]
+            label = choice[1]
+            subtopics = SUBCATEGORIES.get(key, [])
+            abbrev = CATEGORY_ABBREVIATIONS.get(key, label)
+            topic_list.append({
+                "key": key,
+                "label": label,
+                "abbrev": abbrev,
+                "subtopics": subtopics,
+            })
+        return Response({"topics": topic_list}, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=["Support - Team"],
+    summary="Get pre-fill customer information for support ticket form",
+    description="Auto-populates customer name, email, phone, company name, and plan type from logged in team session.",
+    responses={200: TeamTicketPrefillSerializer},
+)
+class TeamTicketPrefillView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "support.submit_ticket"
+
+    def get(self, request):
+        user = request.user
+        team = get_team_for_user(user)
+
+        name = ""
+        phone = ""
+        if hasattr(user, "team_admin_profile") and user.team_admin_profile.full_name:
+            name = user.team_admin_profile.full_name
+            phone = user.team_admin_profile.phone_number or ""
+        elif hasattr(user, "team_member_profile") and user.team_member_profile.username:
+            name = user.team_member_profile.username
+        else:
+            name = user.email.split("@")[0]
+
+        company = team.name if team else ""
+        plan_type = "Team"
+
+        data = {
+            "name": name,
+            "account_email": user.email,
+            "phone": phone,
+            "company": company,
+            "plan_type": plan_type,
+        }
+        return Response(data, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=["Support - Team"],
+    summary="Submit a support ticket from Team Dashboard",
+    description="Creates a support ticket with up to 3 attachments, assigns ticket number, and notifies staff and customer.",
+    request=TeamSubmitTicketSerializer,
+    responses={
+        201: {
+            "type": "object",
+            "properties": {
+                "success": {"type": "boolean"},
+                "ticket_id": {"type": "integer"},
+                "ticket_number": {"type": "string"},
+                "status": {"type": "string"},
+                "priority": {"type": "string"},
+                "created_at": {"type": "string"},
+            },
+        }
+    },
+)
+class TeamSubmitTicketView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "support.submit_ticket"
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        serializer = TeamSubmitTicketSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        ticket = serializer.save()
+
+        return Response(
+            {
+                "success": True,
+                "ticket_id": ticket.id,
+                "ticket_number": ticket.ticket_number,
+                "status": ticket.get_status_display(),
+                "priority": ticket.get_priority_display(),
+                "created_at": ticket.created_at.isoformat(),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@extend_schema(
+    tags=["Support - Team"],
+    summary="List tickets submitted by current team or user",
+    parameters=[
+        OpenApiParameter("search", OpenApiTypes.STR, description="Search query"),
+        OpenApiParameter("status", OpenApiTypes.STR, description="Filter by status"),
+        OpenApiParameter("page", OpenApiTypes.INT, description="Page number"),
+        OpenApiParameter("page_size", OpenApiTypes.INT, description="Page size"),
+    ],
+    responses={200: SupportTicketListSerializer(many=True)},
+)
+class TeamMyTicketsListView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "support.submit_ticket"
+
+    def get(self, request):
+        team = get_team_for_user(request.user)
+        qs = SupportTicket.objects.filter(
+            Q(team=team) | Q(customer_user=request.user) | Q(account_email__iexact=request.user.email)
+        ).select_related("assigned_to", "customer_user").order_by("-created_at")
+
+        search = request.query_params.get("search") or request.query_params.get("q")
+        if search:
+            search = search.strip()
+            qs = qs.filter(
+                Q(ticket_number__icontains=search)
+                | Q(subject__icontains=search)
+                | Q(description__icontains=search)
+            )
+
+        status_param = request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        if page is not None:
+            serializer = SupportTicketListSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = SupportTicketListSerializer(qs, many=True)
+        return Response(serializer.data)
+
+
+@extend_schema(
+    tags=["Support - Team"],
+    summary="List downloadable support resources and guides",
+    parameters=[
+        OpenApiParameter("search", OpenApiTypes.STR, description="Search query by file title or description"),
+        OpenApiParameter("category", OpenApiTypes.STR, description="Filter by resource category"),
+    ],
+    responses={200: SupportResourceSerializer(many=True)},
+)
+class TeamSupportResourcesListView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "support.resources"
+
+    def get(self, request):
+        qs = SupportResource.objects.filter(is_active=True).order_by("title")
+
+        search = request.query_params.get("search") or request.query_params.get("q")
+        if search:
+            search = search.strip()
+            qs = qs.filter(
+                Q(title__icontains=search)
+                | Q(description__icontains=search)
+                | Q(file_name__icontains=search)
+            )
+
+        category = request.query_params.get("category")
+        if category:
+            qs = qs.filter(category__iexact=category)
+
+        serializer = SupportResourceSerializer(qs, many=True, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=["Support - Team"],
+    summary="Download a support resource file",
+    description="Streams the file attachment and increments the resource download counter.",
+)
+class TeamSupportResourceDownloadView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "support.resources"
+
+    def get(self, request, resource_id):
+        resource = get_object_or_404(SupportResource, id=resource_id, is_active=True)
+        if not resource.file:
+            raise Http404("Resource file not found on disk.")
+
+        # Increment download counter
+        resource.download_count += 1
+        resource.save(update_fields=["download_count", "updated_at"])
+
+        response = FileResponse(
+            resource.file.open("rb"),
+            as_attachment=True,
+            filename=resource.file_name or os.path.basename(resource.file.name),
+        )
+        return response
+
+
+# ==============================================================================
+# ── ADMIN SUPPORT RESOURCE VIEWS ─────────────────────────────────────────────
+# ==============================================================================
+
+
+@extend_schema_view(
+    list=extend_schema(
+        tags=["Support - Admin"],
+        summary="Admin: List all support resources (active and inactive)",
+    ),
+    retrieve=extend_schema(
+        tags=["Support - Admin"],
+        summary="Admin: Get support resource details",
+    ),
+    create=extend_schema(
+        tags=["Support - Admin"],
+        summary="Admin: Upload and create a new support resource (guide, template, video)",
+    ),
+    update=extend_schema(
+        tags=["Support - Admin"],
+        summary="Admin: Update support resource title, category, or file",
+    ),
+    partial_update=extend_schema(
+        tags=["Support - Admin"],
+        summary="Admin: Partially update support resource",
+    ),
+    destroy=extend_schema(
+        tags=["Support - Admin"],
+        summary="Admin: Delete a support resource",
+    ),
+)
+class AdminSupportResourceViewSet(viewsets.ModelViewSet):
+    queryset = SupportResource.objects.all().order_by("-created_at")
+    permission_classes = [IsAuthenticated, HasAdminDashboardPermission]
+    required_admin_permission = "support_tools.support_tickets"
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_serializer_class(self):
+        if self.action in ["create", "update", "partial_update"]:
+            return SupportResourceAdminCreateUpdateSerializer
+        return SupportResourceSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(uploaded_by=self.request.user)
+

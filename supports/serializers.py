@@ -22,6 +22,7 @@ from supports.models import (
     TicketAttachment,
     TicketMessage,
     TicketActivityLog,
+    SupportResource,
 )
 from supports.utils import (
     generate_ticket_number,
@@ -656,3 +657,253 @@ class CustomerSearchResultSerializer(serializers.Serializer):
     company_name = serializers.CharField(allow_blank=True, allow_null=True)
     plan_type = serializers.CharField()
     is_active = serializers.BooleanField()
+
+
+# ── Team Support Serializers ──────────────────────────────────────────────────
+
+class TeamContactEmailsSerializer(serializers.Serializer):
+    technical_issues = serializers.EmailField()
+    subscription_help = serializers.EmailField()
+    fleet_sales = serializers.EmailField()
+    legal = serializers.EmailField()
+
+
+class TeamContactInfoSerializer(serializers.Serializer):
+    phone = serializers.CharField()
+    emails = TeamContactEmailsSerializer()
+
+
+class TopicSubtopicItemSerializer(serializers.Serializer):
+    key = serializers.CharField()
+    label = serializers.CharField()
+    abbrev = serializers.CharField()
+    subtopics = serializers.ListField(child=serializers.CharField())
+
+
+class TeamTopicsDictionarySerializer(serializers.Serializer):
+    topics = TopicSubtopicItemSerializer(many=True)
+
+
+class TeamTicketPrefillSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    account_email = serializers.EmailField()
+    phone = serializers.CharField(allow_blank=True)
+    company = serializers.CharField(allow_blank=True)
+    plan_type = serializers.CharField()
+
+
+class TeamSubmitTicketSerializer(serializers.Serializer):
+    name = serializers.CharField(required=True, help_text="First/last name")
+    account_email = serializers.EmailField(required=True, help_text="Account email")
+    phone = serializers.CharField(required=False, allow_blank=True, default="")
+    company = serializers.CharField(required=False, allow_blank=True, default="")
+    plan_type = serializers.ChoiceField(
+        choices=["Team", "Fleet", "Trial user", "Individual"],
+        default="Team",
+        required=False,
+    )
+    preferred_contact_method = serializers.ChoiceField(
+        choices=["Phone", "Email", "PHONE", "EMAIL"],
+        default="Email",
+        required=False,
+    )
+    platform = serializers.ChoiceField(
+        choices=["iPhone", "iPod", "Android Phone", "Android Tablet", "Web Dashboard", "Other"],
+        default="Web Dashboard",
+        required=False,
+    )
+    other_device = serializers.CharField(required=False, allow_blank=True, default="")
+    main_category = serializers.CharField(required=True, help_text="Main Category key or label")
+    subcategory = serializers.CharField(required=False, allow_blank=True, default="")
+    subject = serializers.CharField(required=True, max_length=255)
+    description = serializers.CharField(required=True)
+    safety_critical = serializers.BooleanField(
+        default=False,
+        help_text="Is this issue currently preventing you from safely following your permitted route?",
+    )
+    uploaded_files = serializers.ListField(
+        child=serializers.FileField(),
+        required=False,
+        write_only=True,
+        help_text="Up to 3 screenshot / doc files",
+    )
+
+    def validate_uploaded_files(self, files):
+        if len(files) > MAX_ATTACHMENTS_PER_TICKET:
+            raise serializers.ValidationError(
+                f"Maximum {MAX_ATTACHMENTS_PER_TICKET} files allowed per ticket."
+            )
+        for f in files:
+            ext = os.path.splitext(f.name)[1].lstrip(".").lower()
+            if ext not in ALLOWED_ATTACHMENT_EXTENSIONS:
+                raise serializers.ValidationError(
+                    f"File extension '.{ext}' not allowed. Allowed: {', '.join(ALLOWED_ATTACHMENT_EXTENSIONS)}"
+                )
+            if f.size > MAX_ATTACHMENT_SIZE_BYTES:
+                raise serializers.ValidationError(
+                    f"File {f.name} exceeds 3MB limit."
+                )
+            try:
+                scan_file_for_malware(f)
+            except ValueError as e:
+                raise serializers.ValidationError(str(e))
+        return files
+
+    def create(self, validated_data):
+        user = self.context.get("request").user if self.context.get("request") else None
+        uploaded_files = validated_data.pop("uploaded_files", [])
+
+        # Find team associated with user
+        team_obj = None
+        if user and user.is_authenticated:
+            if hasattr(user, "owned_team"):
+                team_obj = user.owned_team
+            elif hasattr(user, "team_member_profile") and user.team_member_profile.team:
+                team_obj = user.team_member_profile.team
+            elif hasattr(user, "team_admin_profile") and user.team_admin_profile.team:
+                team_obj = user.team_admin_profile.team
+
+        # Resolve category
+        raw_cat = validated_data.get("main_category", "")
+        main_category = CATEGORY_LABEL_TO_KEY.get(raw_cat, raw_cat)
+        if main_category not in MainCategory.values:
+            main_category = MainCategory.GENERAL_OTHER
+
+        subcategory = validated_data.get("subcategory", "")
+        safety_critical = validated_data.get("safety_critical", False)
+        priority = determine_ticket_priority(
+            safety_critical=safety_critical,
+            main_category=main_category,
+            subcategory=subcategory,
+        )
+
+        # Contact method normalize
+        raw_contact = validated_data.get("preferred_contact_method", "Email").upper()
+        contact_method = ContactMethod.PHONE if "PHONE" in raw_contact else ContactMethod.EMAIL
+
+        # Device / platform
+        platform = validated_data.get("platform", "Web Dashboard")
+        device = validated_data.get("other_device") if platform == "Other" else platform
+
+        customer_name = validated_data.get("name")
+        account_email = validated_data.get("account_email")
+        company_name = validated_data.get("company")
+        if not company_name and team_obj:
+            company_name = team_obj.name
+
+        with transaction.atomic():
+            ticket = SupportTicket.objects.create(
+                ticket_number=generate_ticket_number(),
+                status=TicketStatus.NEW,
+                priority=priority,
+                source=TicketSource.TEAM_DASHBOARD,
+                customer_name=customer_name,
+                customer_email=account_email,
+                customer_phone=validated_data.get("phone"),
+                company_name=company_name,
+                account_email=account_email,
+                customer_user=user if (user and user.is_authenticated) else None,
+                team=team_obj,
+                plan_type=validated_data.get("plan_type", "Team"),
+                main_category=main_category,
+                subcategory=subcategory,
+                subject=validated_data.get("subject"),
+                description=validated_data.get("description"),
+                safety_critical=safety_critical,
+                platform=platform,
+                device=device,
+                preferred_contact_method=contact_method,
+                send_confirmation_email=True,
+                created_by=user if (user and user.is_authenticated) else None,
+                updated_by=user if (user and user.is_authenticated) else None,
+            )
+
+            # Save attachments
+            for f in uploaded_files:
+                TicketAttachment.objects.create(
+                    ticket=ticket,
+                    file=f,
+                    original_filename=f.name,
+                    file_size=f.size,
+                    file_type=os.path.splitext(f.name)[1].lstrip(".").lower(),
+                    uploaded_by=user if (user and user.is_authenticated) else None,
+                )
+
+            # Record initial activity log
+            TicketActivityLog.objects.create(
+                ticket=ticket,
+                action_summary="Ticket submitted via Team Dashboard Support Form",
+                performed_by=user if (user and user.is_authenticated) else None,
+            )
+
+        # Trigger emails
+        send_customer_confirmation_email(ticket)
+        send_staff_notification_email(ticket)
+
+        return ticket
+
+
+# ── Support Resource Serializers ──────────────────────────────────────────────
+
+class SupportResourceSerializer(serializers.ModelSerializer):
+    file_size_formatted = serializers.SerializerMethodField()
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupportResource
+        fields = [
+            "id",
+            "title",
+            "description",
+            "file",
+            "file_name",
+            "file_size",
+            "file_size_formatted",
+            "file_type",
+            "category",
+            "download_count",
+            "download_url",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "file_name",
+            "file_size",
+            "file_size_formatted",
+            "file_type",
+            "download_count",
+            "download_url",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_file_size_formatted(self, obj):
+        size = obj.file_size or 0
+        if size < 1024:
+            return f"{size} B"
+        elif size < 1024 * 1024:
+            return f"{size / 1024:.1f} KB"
+        else:
+            return f"{size / (1024 * 1024):.1f} MB"
+
+    def get_download_url(self, obj):
+        request = self.context.get("request")
+        if request:
+            return request.build_absolute_uri(f"/api/v1/supports/team/resources/{obj.id}/download/")
+        return f"/api/v1/supports/team/resources/{obj.id}/download/"
+
+
+class SupportResourceAdminCreateUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SupportResource
+        fields = [
+            "id",
+            "title",
+            "description",
+            "file",
+            "category",
+            "is_active",
+        ]
+

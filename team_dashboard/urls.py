@@ -33,6 +33,15 @@ from team_dashboard.views import (
     # Utility
     TeamPermissionTreeView,
 )
+from supports.views import (
+    TeamContactInfoView,
+    TeamTopicsDictionaryView,
+    TeamTicketPrefillView,
+    TeamSubmitTicketView,
+    TeamMyTicketsListView,
+    TeamSupportResourcesListView,
+    TeamSupportResourceDownloadView,
+)
 
 urlpatterns = [
     # -------------------------------------------------------------
@@ -87,5 +96,17 @@ urlpatterns = [
     # 6. PERMISSIONS REFERENCE
     # -------------------------------------------------------------
     path("manage/permissions-tree/", TeamPermissionTreeView.as_view(), name="team-permissions-tree"),
+
+    # -------------------------------------------------------------
+    # 7. SUPPORT SECTION
+    # -------------------------------------------------------------
+    path("support/contact-info/", TeamContactInfoView.as_view(), name="team-dashboard-support-contact-info"),
+    path("support/topics/", TeamTopicsDictionaryView.as_view(), name="team-dashboard-support-topics"),
+    path("support/prefill/", TeamTicketPrefillView.as_view(), name="team-dashboard-support-prefill"),
+    path("support/submit-ticket/", TeamSubmitTicketView.as_view(), name="team-dashboard-support-submit-ticket"),
+    path("support/my-tickets/", TeamMyTicketsListView.as_view(), name="team-dashboard-support-my-tickets"),
+    path("support/resources/", TeamSupportResourcesListView.as_view(), name="team-dashboard-support-resources"),
+    path("support/resources/<int:resource_id>/download/", TeamSupportResourceDownloadView.as_view(), name="team-dashboard-support-resource-download"),
 ]
+
 
