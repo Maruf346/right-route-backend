@@ -133,6 +133,12 @@ SPECTACULAR_SETTINGS = {
             }
         }
     },
+    
+    # Sort Alphabetically the endpoints in the schema
+    'SWAGGER_UI_SETTINGS': {
+        'tagsSorter': 'alpha',      # Sort tags alphabetically
+        'operationsSorter': 'alpha',# Sort operations alphabetically
+    }
 }
 
 # ==================== Rest Frame Work Configurations End====================

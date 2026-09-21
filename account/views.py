@@ -536,7 +536,7 @@ class ChangePasswordView(OwnAPIView):
 
 
 @extend_schema(
-    tags=["Profile"],
+    tags=["Auth - Account"],
     summary="Current User",
     description="Current User",
 )

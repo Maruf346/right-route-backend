@@ -28,49 +28,70 @@ from account.emailsend import EmailInvitationLink
 
 @extend_schema_view(
     list=extend_schema(
+        tags=["Team"],
         description="Get list of team members.",
         responses={
             status.HTTP_200_OK: OpenApiTypes.OBJECT,
         }
     ),
     add_member=extend_schema(
+        tags=["Team"],
         description="Add a new team member.",
         responses={
             status.HTTP_200_OK: OpenApiTypes.OBJECT,
         }
     ),
     multiple_add_member=extend_schema(
+        tags=["Team"],
         description="Add multiple team members.",
         responses={
             status.HTTP_200_OK: OpenApiTypes.OBJECT,
         }
     ),
     detail_member=extend_schema(
+        tags=["Team"],
         description="Get team member details.",
         responses={
             status.HTTP_200_OK: OpenApiTypes.OBJECT,
         }
     ),
     update_member=extend_schema(
+        tags=["Team"],
         description="Update team member details.",
         responses={
             status.HTTP_200_OK: OpenApiTypes.OBJECT,
         }
     ),
     bulk_delete_member=extend_schema(
+        tags=["Team"],
         description="Delete team members.",
         responses={
             status.HTTP_200_OK: OpenApiTypes.OBJECT,
         }
     ),
     remove_member=extend_schema(
+        tags=["Team"],
         description="Remove team member.",
         responses={
             status.HTTP_200_OK: OpenApiTypes.OBJECT,
         }
+    ),
+    send_invite=extend_schema(
+        tags=["Team"],
+        description="Send invitation to a user.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    ),
+    accept_invite=extend_schema(
+        tags=["Team"],
+        description="Accept team invite.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
     )
+    
 )
-@extend_schema(exclude=True)
 class TeamViewSet(ListModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
 
@@ -88,6 +109,13 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
             }
         )
 
+    @extend_schema(
+        tags=["Team"],
+        description="Get list of team members.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    )
     @action(detail=False, methods=["get"], url_path="members")
     def members(self, request):
         queryset = (
@@ -128,6 +156,13 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
         accept_link = f"{settings.FRONTEND_URL}/team/invite/{invite.uuid}/accept"
         return invite, accept_link
     
+    @extend_schema(
+        tags=["Team"],
+        description="Add a new team member.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    )
     @members.mapping.post
     def add_member(self, request):
         try:
@@ -264,6 +299,7 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
 class AcceptTeamInviteView(APIView):
 
     @extend_schema(
+        tags=["Team"],
         description="Accept team invite.",
         responses={
             status.HTTP_200_OK: OpenApiTypes.OBJECT,
