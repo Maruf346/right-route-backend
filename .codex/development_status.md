@@ -180,6 +180,28 @@ No existing view, URL, serializer, model, or migration may be modified without t
 
 ---
 
+---
+
+### `team_dashboard` app — ✅ COMPLETE
+**Purpose:** Team / Fleet Dashboard Authentication & Section Permissions (2-step MFA login, 6-digit email OTP, Super Admin & Sub-admin role/section access control).
+**Source spec:** `docs/team  dashboard/00 Team dash login section.pdf`
+**Swagger tag:** `Team Dashboard - Auth`
+
+**Models:**
+- `TeamAdminProfile` — sub-admin profile mapping users to teams with specific roles (`SUPER_ADMIN`, `ADMIN`, `MEMBER`) and section permissions (`MANAGE`, `SUPPORT`, `LEGAL`, `SECURITY`).
+
+**APIs:**
+
+| Method | URL | Description |
+|---|---|---|
+| POST | `/api/v1/team-dashboard/auth/login/` | Step 1: Validate email + password and dispatch 6-digit email OTP |
+| POST | `/api/v1/team-dashboard/auth/verify-otp/` | Step 2: Verify 6-digit OTP, issue JWT tokens, role, team details & permissions |
+| POST | `/api/v1/team-dashboard/auth/resend-otp/` | Resend verification code |
+| GET | `/api/v1/team-dashboard/auth/session/` | Get current authenticated team dashboard user session, permissions & team details |
+| POST | `/api/v1/team-dashboard/auth/logout/` | Blacklist refresh token and logout |
+
+---
+
 ## Future Fleet Plan Integration Guide (When Fleet Plans are Added)
 
 When dedicated Fleet Plan models / contracts are implemented in the project:
@@ -192,10 +214,9 @@ When dedicated Fleet Plan models / contracts are implemented in the project:
 
 ---
 
-## Admin Dashboard PDFs (Source Specs)
+## Admin & Team Dashboard PDFs (Source Specs)
 
-Located in `docs/admin_dashboard/`. Each PDF describes a section of the admin dashboard.
-
+### Admin Dashboard Specs (`docs/admin_dashboard/`)
 | PDF File | Status | Notes |
 |---|---|---|
 | `00 Admin login _ home page.pdf` | Not started | Login + home page visuals |
@@ -209,3 +230,8 @@ Located in `docs/admin_dashboard/`. Each PDF describes a section of the admin da
 | `07 Support Tools - User-Staff Resources section.pdf` | Not started | Resource management |
 | `08 Security - Audit Logs section.pdf` | Not started | Audit log viewer |
 | `08 Security - Data Protection section.pdf` | ✅ **COMPLETE** | `security` app |
+
+### Team Dashboard Specs (`docs/team  dashboard/`)
+| PDF File | Status | Notes |
+|---|---|---|
+| `00 Team dash login section.pdf` | ✅ **COMPLETE** | `team_dashboard` app (Auth, MFA, Permissions) |
