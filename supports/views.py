@@ -78,6 +78,10 @@ class StandardResultsSetPagination(PageNumberPagination):
         tags=["Support - Tickets"],
         summary="Create a new support ticket or draft from Admin Dashboard",
     ),
+    update=extend_schema(
+        tags=["Support - Tickets"],
+        summary="Update ticket status, priority, assignment, etc.",
+    ),
     partial_update=extend_schema(
         tags=["Support - Tickets"],
         summary="Update ticket status, priority, assignment, etc.",

@@ -35,6 +35,10 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        # Avoid accessing request.user during schema introspection
+        if getattr(self, "swagger_fake_view", False):
+            return UserSubscription.objects.none()
+
         return (
             UserSubscription.objects
             .select_related("plan", "team", "user")

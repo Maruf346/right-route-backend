@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema
 from django.shortcuts import render
 from rest_framework.generics import GenericAPIView
 from .serializers import GetStartingWaypiontSerializer
@@ -102,6 +103,12 @@ def get_lat_lng(location_string):
     except Exception as e:
         return None, f"Error: {str(e)}"
 
+
+@extend_schema(
+    tags=["Waypoint"],
+    summary="Get Starting Waypoint",
+    description="Get Starting Waypoint",
+)
 class GetStartingWaypointViews(GenericAPIView):
     serializer_class = GetStartingWaypiontSerializer
     

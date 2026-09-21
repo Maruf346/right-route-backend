@@ -9,6 +9,7 @@ from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 from account.models import User, OTPVerification, UserLogDevice, TeamMemberInvite, TeamMember
 from rest_framework.exceptions import ValidationError, NotFound, PermissionDenied
 from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from .serializers import (
     ContinueSerializer,
     LoginSerializer,
@@ -31,6 +32,11 @@ from django.contrib.auth.hashers import identify_hasher
 from django.utils import timezone
 
 
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Device Info",
+    description="Device Info",
+)
 class DeviceInfoView(APIView):
     permission_classes = [IsAuthenticatedOrReadOnly]
     
@@ -112,7 +118,11 @@ class DeviceInfoView(APIView):
             )
 
 
-
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Continue",
+    description="Continue",
+)
 class ContinueAPIView(OwnAPIView):
     serializer_class = ContinueSerializer
     permission_classes = []
@@ -155,6 +165,11 @@ class ContinueAPIView(OwnAPIView):
             }
         )
 
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Create Password",
+    description="Create Password",
+)
 class CreatePasswordAPIView(OwnAPIView):
     serializer_class = CreatePasswordSerializer
     permission_classes = []
@@ -170,6 +185,11 @@ class CreatePasswordAPIView(OwnAPIView):
             status=status.HTTP_201_CREATED,
         )
 
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Login",
+    description="Login",
+)
 class LoginAPIView(OwnAPIView):
     serializer_class = LoginSerializer
     permission_classes = []
@@ -192,6 +212,12 @@ class LoginAPIView(OwnAPIView):
                 }
             )
 
+
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Verify OTP",
+    description="Verify OTP",
+)
 class VerifyOTPAPIView(APIView):
     permission_classes = []
 
@@ -236,6 +262,12 @@ class VerifyOTPAPIView(APIView):
             }
         )
 
+
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Resend OTP",
+    description="Resend OTP",
+)
 class ResendOTPAPIView(OwnAPIView):
     serializer_class = ResendOTPSerializer
     permission_classes = []
@@ -247,7 +279,13 @@ class ResendOTPAPIView(OwnAPIView):
             status=status.HTTP_200_OK,
         )
 
-# Direct OTP Based Login-------
+
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Direct Login OTP Send",
+    description="Direct Login OTP Send",
+)
+#Direct OTP based login
 class DirectLoginOTPSendView(APIView):
     def post(self, request, *args, **kwargs) -> Response:
         try:
@@ -276,6 +314,11 @@ class DirectLoginOTPSendView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST
             )
 
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Direct Login OTP Verify",
+    description="Direct Login OTP Verify",
+)
 class DirectLoginOTPVerifyView(APIView):
     def post(self, request, *args, **kwargs) -> Response:
         try:
@@ -313,6 +356,11 @@ class DirectLoginOTPVerifyView(APIView):
 
 
 # Forget and Reset Password---
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Forget Password",
+    description="Forget Password",
+)
 class ForgetPasswordView(OwnAPIView):
     serializer_class = ForgetPasswordSerializer
     permission_classes = []
@@ -329,6 +377,11 @@ class ForgetPasswordView(OwnAPIView):
                 }
             )
 
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Reset Password",
+    description="Reset Password",
+)
 class ResetPasswordView(OwnAPIView):
     serializer_class = ResetPasswordSerializer
     permission_classes = []
@@ -350,6 +403,11 @@ class ResetPasswordView(OwnAPIView):
             }
         )
 
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Change Email",
+    description="Change Email",
+)
 class ChangeEmailAPIView(APIView):
     serializer_class = ChangeEmailSerializer
     permission_classes = [IsAuthenticated]
@@ -376,6 +434,12 @@ class ChangeEmailAPIView(APIView):
                 {"success": False, "detail": str(e)}, status=status.HTTP_400_BAD_REQUEST
             )
 
+
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Account Delete",
+    description="Account Delete",
+)
 class AccountDeleteAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -387,6 +451,12 @@ class AccountDeleteAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Logout",
+    description="Logout",
+)
 class LogoutAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -394,6 +464,12 @@ class LogoutAPIView(APIView):
         logout(request)
         return Response({"success": True, "detail": "Logout successful."})
 
+
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Refresh Token",
+    description="Refresh Token",
+)
 class RefreshTokenAPIView(TokenRefreshView):
     def post(self, request: Request, *args, **kwargs) -> Response:
         serializer = self.get_serializer(data=request.data)
@@ -413,6 +489,12 @@ class RefreshTokenAPIView(TokenRefreshView):
                 {"success": False, "detail": str(e)}, status=status.HTTP_400_BAD_REQUEST
             )
 
+
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Verify Token",
+    description="Verify Token",
+)
 class VerifyTokenAPIView(TokenVerifyView):
     def post(self, request, *args, **kwargs) -> Response:
         try:
@@ -431,6 +513,12 @@ class VerifyTokenAPIView(TokenVerifyView):
                 {"success": False, "detail": str(e)}, status=status.HTTP_400_BAD_REQUEST
             )
 
+
+@extend_schema(
+    tags=["Auth - Account"],
+    summary="Change Password",
+    description="Change Password",
+)
 class ChangePasswordView(OwnAPIView):
     serializer_class = ChangePasswordSerializer
     permission_classes = [IsAuthenticated]
@@ -447,7 +535,11 @@ class ChangePasswordView(OwnAPIView):
         )
 
 
-
+@extend_schema(
+    tags=["Profile"],
+    summary="Current User",
+    description="Current User",
+)
 class CurrentUserAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -459,6 +551,12 @@ class CurrentUserAPIView(APIView):
             "data": serializer.data
         })
 
+
+@extend_schema(
+    tags=["Team"],
+    summary="Accept Team Member Invitation",
+    description="Accept Team Member Invitation",
+)
 class AcceptTeamMemberInvitation(APIView):
     permission_classes = [IsAuthenticated]
     

@@ -83,6 +83,18 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
+# Ensure DRF's runtime api_settings uses drf-spectacular's AutoSchema class.
+# This helps avoid cases where DRF may have injected its own AutoSchema
+# class into view annotations before our settings were read.
+try:
+    from rest_framework.settings import api_settings as _drf_api_settings
+    from drf_spectacular.openapi import AutoSchema as _SpectacularAutoSchema
+    # set the class object so runtime checks (isinstance) succeed
+    _drf_api_settings.DEFAULT_SCHEMA_CLASS = _SpectacularAutoSchema
+except Exception:
+    # best-effort; if this fails it's non-fatal for normal runtime
+    pass
+
 SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
     'BLACKLIST_AFTER_ROTATION': True,

@@ -1,3 +1,5 @@
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiTypes
+from drf_spectacular.openapi import AutoSchema
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import action
@@ -24,6 +26,51 @@ from django.db.models import Q
 from account.emailsend import EmailInvitationLink
 
 
+@extend_schema_view(
+    list=extend_schema(
+        description="Get list of team members.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    ),
+    add_member=extend_schema(
+        description="Add a new team member.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    ),
+    multiple_add_member=extend_schema(
+        description="Add multiple team members.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    ),
+    detail_member=extend_schema(
+        description="Get team member details.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    ),
+    update_member=extend_schema(
+        description="Update team member details.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    ),
+    bulk_delete_member=extend_schema(
+        description="Delete team members.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    ),
+    remove_member=extend_schema(
+        description="Remove team member.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    )
+)
+@extend_schema(exclude=True)
 class TeamViewSet(ListModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
 
@@ -175,6 +222,7 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
         )
     
     @detail_member.mapping.patch
+    @extend_schema(exclude=True)
     def update_member(self, request, member_id=None):
         member = get_object_or_404(TeamMember, id=member_id, team=self.get_team())
         serializer = TeamMemberUpdateSerializer(member, data=request.data, partial=True)
@@ -211,7 +259,16 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
             status=status.HTTP_200_OK
         )
 
+
+
 class AcceptTeamInviteView(APIView):
+
+    @extend_schema(
+        description="Accept team invite.",
+        responses={
+            status.HTTP_200_OK: OpenApiTypes.OBJECT,
+        }
+    )
     def get(self, request, uuid):
         try:
             invite = TeamMemberInvite.objects.select_related(

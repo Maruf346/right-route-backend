@@ -6,11 +6,22 @@ from rest_framework.exceptions import ValidationError
 
 class OwnAPIView(APIView):
     serializer_class = None
-    
-    def get_serializer(self, data):
-        if self.serializer_class:
-            return self.serializer_class(data=data, context={"request": self.request})
-        return None
+
+    def get_serializer(self, *args, **kwargs):
+        """Return serializer instance. Accepts arbitrary args/kwargs and
+        ensures a default `context` containing the request is provided,
+        matching DRF's GenericAPIView behavior so external callers
+        (like schema generators) can call with `context=`.
+        """
+        if not self.serializer_class:
+            return None
+
+        kwargs.setdefault("context", {})
+        # ensure request is available in context
+        if "request" not in kwargs["context"]:
+            kwargs["context"]["request"] = getattr(self, "request", None)
+
+        return self.serializer_class(*args, **kwargs)
     
     def success_response(self, serializer):
         return Response(

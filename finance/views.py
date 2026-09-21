@@ -238,6 +238,10 @@ class ExpenseSummaryView(APIView):
         tags=["Finance - Income & Expenses"],
         summary="Record a new expense (Add New Expense form)",
     ),
+    update=extend_schema(
+        tags=["Finance - Income & Expenses"],
+        summary="Update an existing expense (Edit Expense form)",
+    ),
     partial_update=extend_schema(
         tags=["Finance - Income & Expenses"],
         summary="Update an existing expense (Edit Expense form)",

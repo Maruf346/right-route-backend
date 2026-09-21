@@ -15,7 +15,14 @@ from core.viewsets import OwnModelViewSet
 from rest_framework.exceptions import ValidationError, NotFound
 from django.utils import timezone
 from django.db import transaction
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 
+
+@extend_schema(
+    tags=["Route"],
+    summary="Route ViewSets",
+    description="Route ViewSets",
+)
 class RouteViewSets(OwnModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [SearchFilter, DjangoFilterBackend]
@@ -30,6 +37,12 @@ class RouteViewSets(OwnModelViewSet):
         return RouteListSerializer
     
     def get_queryset(self):
+        # When drf-spectacular introspects views it may call get_queryset
+        # without a normal request (or with an AnonymousUser). Guard against
+        # that by returning an empty queryset for schema generation.
+        if getattr(self, "swagger_fake_view", False):
+            return Route.objects.none()
+
         return (
             Route.objects.prefetch_related(
                 "permits",
