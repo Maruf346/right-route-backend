@@ -242,3 +242,74 @@ def send_completion_email(request_obj):
     subject = f"RightRoute Data Request Completed ({request_obj.request_id})"
     _send(subject, body, request_obj.customer_email, config, conn)
     return body
+
+
+# ── Team Dashboard Request Emails ─────────────────────────────────────────────
+
+def send_team_request_received_email(request_obj):
+    """
+    Sends confirmation email to customer that RightRoute received their Data Protection request.
+    """
+    try:
+        conn, config = _get_connection()
+    except Exception:
+        return ""
+
+    body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto;">
+        <h2>RightRoute — Data Protection Request Received</h2>
+        <p>Dear {request_obj.customer_name or request_obj.customer_email},</p>
+        <p>We have received your data protection request (ID: <strong>{request_obj.request_id}</strong>).</p>
+        <p><strong>Request Type:</strong> {request_obj.get_request_type_display()}</p>
+        <p><strong>Date Requested:</strong> {request_obj.date_requested.strftime("%d %B %Y, %H:%M UTC")}</p>
+        <p>Our security and compliance team will review your request and contact you soon to verify and process it.</p>
+        <br>
+        <p>Kind regards,<br>
+        <strong>RightRoute Security &amp; Compliance Team</strong></p>
+    </body>
+    </html>
+    """
+    subject = f"RightRoute Data Protection Request Received ({request_obj.request_id})"
+    try:
+        _send(subject, body, request_obj.customer_email, config, conn)
+    except Exception:
+        pass
+    return body
+
+
+def send_team_request_staff_alert(request_obj):
+    """
+    Sends alert email to help@getrightroute.app when a team submits a data protection request.
+    """
+    try:
+        conn, config = _get_connection()
+    except Exception:
+        return ""
+
+    body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto;">
+        <h2>[Security Alert] New Data Protection Request Submitted</h2>
+        <p>A new data protection request has been submitted from the Team Dashboard.</p>
+        <table style="border-collapse: collapse; width: 100%;">
+            <tr><td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Request ID</td><td style="padding: 6px; border: 1px solid #ddd;">{request_obj.request_id}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Customer Name</td><td style="padding: 6px; border: 1px solid #ddd;">{request_obj.customer_name}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Account Email</td><td style="padding: 6px; border: 1px solid #ddd;">{request_obj.customer_email}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Phone</td><td style="padding: 6px; border: 1px solid #ddd;">{request_obj.phone_number or 'N/A'}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Plan Type</td><td style="padding: 6px; border: 1px solid #ddd;">{request_obj.plan_type}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Request Type</td><td style="padding: 6px; border: 1px solid #ddd;">{request_obj.get_request_type_display()}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Date</td><td style="padding: 6px; border: 1px solid #ddd;">{request_obj.date_requested.strftime("%d %B %Y, %H:%M UTC")}</td></tr>
+        </table>
+        <br>
+        <p>Please review and process this request in the Admin Dashboard > Security > Data Protection page.</p>
+    </body>
+    </html>
+    """
+    subject = f"[New Data Request] {request_obj.request_id} - {request_obj.customer_name or request_obj.customer_email}"
+    try:
+        _send(subject, body, "help@getrightroute.app", config, conn)
+    except Exception:
+        pass
+    return body
+

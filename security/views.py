@@ -24,14 +24,31 @@ from drf_spectacular.utils import (
     extend_schema_view,
 )
 
-from account.models import User
+from account.models import User, Team
+from team_dashboard.permissions import (
+    IsTeamDashboardUser,
+    HasTeamDashboardPermission,
+    get_team_for_user,
+)
 from core.constants import NotifyLogAction, LogStatus
 from core.permissions import HasAdminDashboardPermission
 from notification.models import ActivityLog
 from django.contrib.contenttypes.models import ContentType
 
-from security.constants import DataRequestStatus, RequestType
-from security.emails import send_approval_email, send_completion_email
+from security.constants import (
+    DataRequestStatus,
+    RequestType,
+    RequestSource,
+    REQUEST_TYPE_DESCRIPTIONS,
+    TEAM_DATA_PROTECTION_PLAN_CHOICES,
+    DELETE_ACCOUNT_INFO,
+)
+from security.emails import (
+    send_approval_email,
+    send_completion_email,
+    send_team_request_received_email,
+    send_team_request_staff_alert,
+)
 from security.models import (
     DataProtectionRequest,
     DataRequestNote,
@@ -50,17 +67,23 @@ from security.serializers import (
     FindCustomerSerializer,
     GenerateRequestIdSerializer,
     PerformRequestSerializer,
+    TeamDataProtectionPrefillSerializer,
+    TeamDataProtectionOptionsSerializer,
+    TeamDataProtectionSubmitSerializer,
+    TeamDataProtectionRequestItemSerializer,
+    TeamDeleteAccountInfoSerializer,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Permission shorthand
+# Permission shorthand & Tags
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PERMS = [IsAuthenticated, HasAdminDashboardPermission]
 
 DATA_PROTECTION_PERMISSION = "security_logging_compliance.data_protection"
 
-TAG = "Security - Data Protection"
+TAG = "Security - Data Protection - Admin"
+TEAM_TAG = "Security - Data Protection - Team"
 
 
 def _log_action(request, action_type, target_obj, message, metadata=None):
@@ -908,3 +931,190 @@ class ExportDownloadView(APIView):
             filename=zip_filename,
         )
         return response
+
+
+# ==============================================================================
+# ── TEAM DASHBOARD DATA PROTECTION & SECURITY VIEWS ──────────────────────────
+# ==============================================================================
+
+
+@extend_schema(
+    tags=[TEAM_TAG],
+    summary="Get pre-fill customer information for Data Protection form",
+    description="Auto-populates current logged-in user name, email, phone, and plan type for the Data Request Form.",
+    responses={200: TeamDataProtectionPrefillSerializer},
+)
+class TeamDataProtectionPrefillView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "security.data_protection"
+
+    def get(self, request):
+        user = request.user
+        team = get_team_for_user(user)
+
+        name = ""
+        phone = ""
+        if hasattr(user, "team_admin_profile") and user.team_admin_profile.full_name:
+            name = user.team_admin_profile.full_name
+            phone = user.team_admin_profile.phone_number or ""
+        elif hasattr(user, "team_member_profile") and user.team_member_profile.username:
+            name = user.team_member_profile.username
+        else:
+            name = user.email.split("@")[0]
+
+        plan_type = "Team"
+
+        return Response({
+            "name": name,
+            "account_email": user.email,
+            "phone_number": phone,
+            "plan_type": plan_type,
+        }, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=[TEAM_TAG],
+    summary="Get Data Protection plan options and request type definitions",
+    description="Returns plan choices (Team, Fleet) and request type definitions (Export, Delete, Anonymize, Delete & Anonymize).",
+    responses={200: TeamDataProtectionOptionsSerializer},
+)
+class TeamDataProtectionOptionsView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "security.data_protection"
+
+    def get(self, request):
+        request_types = []
+        for choice in RequestType.choices:
+            key = choice[0]
+            label = choice[1]
+            desc = REQUEST_TYPE_DESCRIPTIONS.get(key, "")
+            request_types.append({
+                "key": key,
+                "label": label,
+                "description": desc,
+            })
+
+        return Response({
+            "plan_choices": TEAM_DATA_PROTECTION_PLAN_CHOICES,
+            "request_types": request_types,
+        }, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=[TEAM_TAG],
+    summary="Submit Data Protection request from Team Dashboard",
+    description="Creates a new data protection request, generates DR-YYYY-XXXX identifier, notifies staff and customer.",
+    request=TeamDataProtectionSubmitSerializer,
+    responses={
+        201: {
+            "type": "object",
+            "properties": {
+                "success": {"type": "boolean"},
+                "id": {"type": "integer"},
+                "request_id": {"type": "string"},
+                "status": {"type": "string"},
+                "request_type": {"type": "string"},
+                "date_requested": {"type": "string"},
+                "message": {"type": "string"},
+            },
+        }
+    },
+)
+class TeamDataProtectionSubmitView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "security.data_protection"
+
+    def post(self, request):
+        serializer = TeamDataProtectionSubmitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = request.user
+        team = get_team_for_user(user)
+
+        request_id = generate_request_id()
+        now = timezone.now()
+
+        instance = DataProtectionRequest.objects.create(
+            request_id=request_id,
+            date_requested=now,
+            customer_email=data["account_email"],
+            customer_name=data["name"],
+            phone_number=data.get("phone_number", ""),
+            plan_type=data.get("plan_type", "Team"),
+            request_type=data["request_type"],
+            source=RequestSource.TEAM_DASHBOARD,
+            status=DataRequestStatus.NEW,
+            customer_user=user if user.is_authenticated else None,
+            team=team,
+        )
+
+        # Log system note
+        _add_system_note(instance, f"Request submitted via Team Dashboard by {user.email}.")
+
+        # Send alert to staff and receipt confirmation to customer
+        send_team_request_staff_alert(instance)
+        send_team_request_received_email(instance)
+
+        return Response({
+            "success": True,
+            "id": instance.id,
+            "request_id": instance.request_id,
+            "status": instance.get_status_display(),
+            "request_type": instance.get_request_type_display(),
+            "date_requested": instance.date_requested.isoformat(),
+            "message": "Your data protection request has been submitted. We will contact you soon to verify your request.",
+        }, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(
+    tags=[TEAM_TAG],
+    summary="List data protection requests submitted by current team / customer",
+    parameters=[
+        OpenApiParameter("search", str, description="Search query by request ID, name, email"),
+        OpenApiParameter("status", str, description="Filter by status (NEW, PENDING_APPROVAL, COMPLETED)"),
+    ],
+    responses={200: TeamDataProtectionRequestItemSerializer(many=True)},
+)
+class TeamDataProtectionMyRequestsListView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "security.data_protection"
+
+    def get(self, request):
+        team = get_team_for_user(request.user)
+        from django.db.models import Q
+
+        qs = DataProtectionRequest.objects.filter(
+            Q(team=team) | Q(customer_user=request.user) | Q(customer_email__iexact=request.user.email)
+        ).order_by("-created_at")
+
+        search = request.query_params.get("search") or request.query_params.get("q")
+        if search:
+            search = search.strip()
+            qs = qs.filter(
+                Q(request_id__icontains=search)
+                | Q(customer_name__icontains=search)
+                | Q(customer_email__icontains=search)
+            )
+
+        status_param = request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        serializer = TeamDataProtectionRequestItemSerializer(qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=[TEAM_TAG],
+    summary="Get Delete Account information & cancellation notices",
+    description="Returns instructions for canceling subscriptions on Team Plan and Fleet Plan.",
+    responses={200: TeamDeleteAccountInfoSerializer},
+)
+class TeamDeleteAccountInfoView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "security.delete_account"
+
+    def get(self, request):
+        return Response(DELETE_ACCOUNT_INFO, status=status.HTTP_200_OK)
+

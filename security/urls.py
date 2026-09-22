@@ -6,6 +6,11 @@ from security.views import (
     ExportDownloadView,
     FindCustomerView,
     GenerateRequestIdView,
+    TeamDataProtectionPrefillView,
+    TeamDataProtectionOptionsView,
+    TeamDataProtectionSubmitView,
+    TeamDataProtectionMyRequestsListView,
+    TeamDeleteAccountInfoView,
 )
 
 router = DefaultRouter()
@@ -16,10 +21,34 @@ router.register(
 )
 
 urlpatterns = [
-    # ViewSet routes (list, create, retrieve, partial_update + custom actions)
-    path("", include(router.urls)),
+    # ── Team Dashboard Endpoints ─────────────────────────────────────────────
+    path(
+        "security/team/data-protection/prefill/",
+        TeamDataProtectionPrefillView.as_view(),
+        name="team-data-protection-prefill",
+    ),
+    path(
+        "security/team/data-protection/options/",
+        TeamDataProtectionOptionsView.as_view(),
+        name="team-data-protection-options",
+    ),
+    path(
+        "security/team/data-protection/submit/",
+        TeamDataProtectionSubmitView.as_view(),
+        name="team-data-protection-submit",
+    ),
+    path(
+        "security/team/data-protection/my-requests/",
+        TeamDataProtectionMyRequestsListView.as_view(),
+        name="team-data-protection-my-requests",
+    ),
+    path(
+        "security/team/delete-account/info/",
+        TeamDeleteAccountInfoView.as_view(),
+        name="team-delete-account-info",
+    ),
 
-    # Standalone endpoints
+    # ── Admin Dashboard Endpoints (ViewSet + Helpers) ────────────────────────
     path(
         "security/data-protection/generate-id/",
         GenerateRequestIdView.as_view(),
@@ -31,10 +60,14 @@ urlpatterns = [
         name="security-find-customer",
     ),
 
-    # Secure download — no auth required, protected by token
+    # Secure download — token based
     path(
         "security/data-protection/download/<str:token>/",
         ExportDownloadView.as_view(),
         name="security-export-download",
     ),
+
+    # ViewSet routes
+    path("", include(router.urls)),
 ]
+

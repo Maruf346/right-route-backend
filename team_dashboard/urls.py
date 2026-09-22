@@ -42,6 +42,13 @@ from supports.views import (
     TeamSupportResourcesListView,
     TeamSupportResourceDownloadView,
 )
+from security.views import (
+    TeamDataProtectionPrefillView,
+    TeamDataProtectionOptionsView,
+    TeamDataProtectionSubmitView,
+    TeamDataProtectionMyRequestsListView,
+    TeamDeleteAccountInfoView,
+)
 
 urlpatterns = [
     # -------------------------------------------------------------
@@ -107,6 +114,16 @@ urlpatterns = [
     path("support/my-tickets/", TeamMyTicketsListView.as_view(), name="team-dashboard-support-my-tickets"),
     path("support/resources/", TeamSupportResourcesListView.as_view(), name="team-dashboard-support-resources"),
     path("support/resources/<int:resource_id>/download/", TeamSupportResourceDownloadView.as_view(), name="team-dashboard-support-resource-download"),
+
+    # -------------------------------------------------------------
+    # 8. SECURITY SECTION
+    # -------------------------------------------------------------
+    path("security/data-protection/prefill/", TeamDataProtectionPrefillView.as_view(), name="team-dashboard-security-prefill"),
+    path("security/data-protection/options/", TeamDataProtectionOptionsView.as_view(), name="team-dashboard-security-options"),
+    path("security/data-protection/submit/", TeamDataProtectionSubmitView.as_view(), name="team-dashboard-security-submit"),
+    path("security/data-protection/my-requests/", TeamDataProtectionMyRequestsListView.as_view(), name="team-dashboard-security-my-requests"),
+    path("security/delete-account/info/", TeamDeleteAccountInfoView.as_view(), name="team-dashboard-security-delete-account-info"),
 ]
+
 
 

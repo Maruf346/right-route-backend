@@ -61,6 +61,14 @@ class DataProtectionRequest(BaseModel):
         related_name="data_protection_requests",
         help_text="Linked RightRoute account (resolved via FIND button).",
     )
+    team = models.ForeignKey(
+        "account.Team",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="data_protection_requests",
+        help_text="Linked Team for team-submitted requests.",
+    )
     customer_name = models.CharField(max_length=255, blank=True, default="")
     plan_type = models.CharField(max_length=50, blank=True, default="")
     account_status = models.CharField(max_length=50, blank=True, default="")

@@ -11,6 +11,8 @@ from security.constants import (
     REQUEST_TYPE_DESCRIPTIONS,
     RequestSource,
     RequestType,
+    TEAM_DATA_PROTECTION_PLAN_CHOICES,
+    DELETE_ACCOUNT_INFO,
 )
 from security.models import DataProtectionRequest, DataRequestNote, generate_request_id
 
@@ -391,3 +393,72 @@ class PerformRequestSerializer(serializers.Serializer):
 
 class GenerateRequestIdSerializer(serializers.Serializer):
     request_id = serializers.CharField()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Team Dashboard Data Protection Serializers
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TeamDataProtectionPrefillSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    account_email = serializers.EmailField()
+    phone_number = serializers.CharField(allow_blank=True)
+    plan_type = serializers.CharField()
+
+
+class RequestTypeOptionSerializer(serializers.Serializer):
+    key = serializers.CharField()
+    label = serializers.CharField()
+    description = serializers.CharField()
+
+
+class TeamDataProtectionOptionsSerializer(serializers.Serializer):
+    plan_choices = serializers.ListField(child=serializers.CharField())
+    request_types = RequestTypeOptionSerializer(many=True)
+
+
+class TeamDataProtectionSubmitSerializer(serializers.Serializer):
+    name = serializers.CharField(required=True, max_length=255, help_text="First / last name")
+    account_email = serializers.EmailField(required=True, help_text="Account email")
+    plan_type = serializers.CharField(required=False, default="Team", help_text="Team or Fleet")
+    phone_number = serializers.CharField(required=False, allow_blank=True, default="", help_text="Phone number")
+    request_type = serializers.ChoiceField(
+        choices=RequestType.choices,
+        required=True,
+        help_text="EXPORT, DELETE, ANONYMIZE, or DELETE_ANONYMIZE",
+    )
+
+
+class TeamDataProtectionRequestItemSerializer(serializers.ModelSerializer):
+    request_type_display = serializers.CharField(source="get_request_type_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = DataProtectionRequest
+        fields = [
+            "id",
+            "request_id",
+            "request_type",
+            "request_type_display",
+            "status",
+            "status_display",
+            "customer_name",
+            "customer_email",
+            "phone_number",
+            "plan_type",
+            "date_requested",
+            "completed_at",
+            "created_at",
+        ]
+
+
+class DeleteAccountInfoSectionSerializer(serializers.Serializer):
+    title = serializers.CharField()
+    instructions = serializers.ListField(child=serializers.CharField())
+    contact_email = serializers.EmailField(required=False)
+
+
+class TeamDeleteAccountInfoSerializer(serializers.Serializer):
+    team_plan = DeleteAccountInfoSectionSerializer()
+    fleet_plan = DeleteAccountInfoSectionSerializer()
+
