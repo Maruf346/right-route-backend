@@ -4,23 +4,16 @@ from django.conf import settings
 from rest_framework.response import Response
 from django.template.loader import render_to_string
 
-# def LogInOTPSend(otp_object):
-def EmailOTPSend(otp_object):
-    email_config = EmailConfig.objects.filter(is_active=True).first()
-    if not email_config:
-        raise Exception("No active email configuration found.")
-    
-    email = otp_object.email
-    otp = otp_object.otp_code
-    
-    subject = "Your OTP Code for Right Routes"
-    context = {"otp": otp}
-    html_message = render_to_string(
-        "mail_template/otp_send.html",
-        context,
-    )
-       
-    connection = get_connection(
+
+def _get_logo_url():
+    """Return absolute URL for the RightRoute logo used in email templates."""
+    site_url = getattr(settings, "SITE_URL", "https://getrightroute.app")
+    return f"{site_url}/static/logo.png"
+
+
+def _build_connection(email_config):
+    """Build an SMTP connection from the active EmailConfig."""
+    return get_connection(
         backend="django.core.mail.backends.smtp.EmailBackend",
         host=email_config.host,
         port=int(email_config.port),
@@ -29,6 +22,28 @@ def EmailOTPSend(otp_object):
         use_tls=email_config.tls,
         fail_silently=False,
     )
+
+
+# def LogInOTPSend(otp_object):
+def EmailOTPSend(otp_object):
+    email_config = EmailConfig.objects.filter(is_active=True).first()
+    if not email_config:
+        raise Exception("No active email configuration found.")
+
+    email = otp_object.email
+    otp = otp_object.otp_code
+
+    subject = "Your RightRoute verification code"
+    context = {
+        "otp": otp,
+        "logo_url": _get_logo_url(),
+    }
+    html_message = render_to_string(
+        "mail_template/otp_send.html",
+        context,
+    )
+
+    connection = _build_connection(email_config)
     email_message = EmailMessage(
         subject=subject,
         body=html_message,
@@ -54,23 +69,25 @@ def EmailOTPSend(otp_object):
             f"Failed to send OTP: {str(e)}"
         )
 
+
 def EmailInvitationLink(invite, accept_link, non_register_user):
     email_config = EmailConfig.objects.filter(is_active=True).first()
     if not email_config:
         raise Exception("No active email configuration found.")
-    
+
     email = invite.invited_to
-    
-    subject = f"You've Been Invited to Join {invite.team.name} on Right Routes"
+
+    subject = f"You've Been Invited to Join {invite.team.name} on RightRoute"
     context = {
         "team_name": invite.team.name,
         "invited_email": invite.invited_to.email,
         "accept_link": accept_link,
         "expires_at": invite.expires_at.strftime("%d %b %Y %I:%M %p"),
+        "logo_url": _get_logo_url(),
     }
     if non_register_user:
         html_message = render_to_string(
-            "mail_template/user_invite.html",
+            "mail_template/non_register_user_invite.html",
             context,
         )
     else:
@@ -78,16 +95,8 @@ def EmailInvitationLink(invite, accept_link, non_register_user):
             "mail_template/user_invite_existing_user.html",
             context,
         )
-    
-    connection = get_connection(
-        backend="django.core.mail.backends.smtp.EmailBackend",
-        host=email_config.host,
-        port=int(email_config.port),
-        username=email_config.host_user,
-        password=email_config.host_password,
-        use_tls=email_config.tls,
-        fail_silently=False,
-    )
+
+    connection = _build_connection(email_config)
     email_message = EmailMessage(
         subject=subject,
         body=html_message,
@@ -108,8 +117,5 @@ def EmailInvitationLink(invite, accept_link, non_register_user):
             f"Invitation Link Failed sent to User Email "
         )
         raise Exception(
-            f"Failed to send OTP: {str(e)}"
+            f"Failed to send invitation: {str(e)}"
         )
-
-
-

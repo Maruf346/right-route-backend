@@ -223,6 +223,7 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024
 
 
 FRONTEND_URL = os.getenv("FRONTEND_URL")
+SITE_URL = os.getenv("SITE_URL", "https://getrightroute.app")
 GOOGLE_MAP_API_KEY = os.getenv("GOOGLE_MAP_API_KEY")
 
 

@@ -5,11 +5,51 @@ All emails are sent to the verified account email on the request.
 Admins cannot change the recipient.
 """
 
+from django.conf import settings
 from django.core.mail import EmailMessage, get_connection
 from django.utils import timezone
 
 from core.models import EmailConfig
 from security.constants import RequestType
+
+
+# ── Shared helpers ─────────────────────────────────────────────────────────────
+
+
+def _get_logo_url():
+    """Return absolute URL for the RightRoute logo used in emails."""
+    site_url = getattr(settings, "SITE_URL", "https://getrightroute.app")
+    return f"{site_url}/static/logo.png"
+
+
+def _email_header(logo_url):
+    """Returns the HTML header block with the RightRoute logo."""
+    return f"""
+    <table width="600" cellpadding="0" cellspacing="0" style="margin:0 auto;background:#ffffff;border:1px solid #e0e0e0;border-radius:4px;overflow:hidden;">
+        <tr><td align="center" style="padding:32px 40px 24px;">
+            <img src="{logo_url}" alt="RightRoute" width="200" style="display:block;max-width:200px;height:auto;border:0;">
+        </td></tr>
+        <tr><td style="padding:0 40px;"><hr style="border:none;border-top:1px solid #e0e0e0;margin:0;"></td></tr>
+        <tr><td style="padding:32px 40px;font-family:Arial,sans-serif;color:#222222;font-size:16px;line-height:1.6;">
+    """
+
+
+def _email_footer():
+    """Returns the HTML footer block with RightRoute branding."""
+    return """
+        </td></tr>
+        <tr><td style="padding:0 40px;"><hr style="border:none;border-top:1px solid #e0e0e0;margin:0;"></td></tr>
+        <tr><td style="padding:24px 40px;font-family:Arial,sans-serif;">
+            <p style="margin:0;font-size:14px;color:#444444;line-height:1.8;">
+                RightRoute&trade;<br>
+                &copy; 2026 Leavitt &amp; Davis LLC. All Rights Reserved.<br>
+                1-888-603-6317<br>
+                getrightroute.app<br>
+                This is an automated email. Please do not reply.
+            </p>
+        </td></tr>
+    </table>
+    """
 
 
 # ── Shared builder ─────────────────────────────────────────────────────────────
@@ -69,58 +109,57 @@ def build_approval_email_body(request_obj, personal_message=""):
     if personal_message:
         personal_section = f"<p><em>{personal_message}</em></p><hr>"
 
-    body = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto;">
-        <h2>RightRoute — Data Protection Request</h2>
+    logo_url = _get_logo_url()
+    body = (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
+        "<body style='margin:0;padding:20px 0;background:#f5f5f5;'>"
+        + _email_header(logo_url)
+        + f"""
         <p>Dear {request_obj.customer_name or request_obj.customer_email},</p>
         {personal_section}
         <p>We have received a data request on your behalf. Below are the details of your request.
         Please review carefully and reply to approve or reject this action.</p>
 
-        <h3>Request Summary</h3>
-        <table style="border-collapse: collapse; width: 100%;">
+        <h3 style="margin:20px 0 8px;">Request Summary</h3>
+        <table style="border-collapse:collapse;width:100%;font-size:15px;">
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Request ID</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.request_id}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Request ID</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.request_id}</td>
             </tr>
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Date Requested</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.date_requested.strftime("%d %B %Y, %H:%M UTC")}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Date Requested</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.date_requested.strftime("%d %B %Y, %H:%M UTC")}</td>
             </tr>
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Account Email</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.customer_email}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Account Email</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.customer_email}</td>
             </tr>
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Customer Name</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.customer_name or "N/A"}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Customer Name</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.customer_name or "N/A"}</td>
             </tr>
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Plan Type</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.plan_type or "N/A"}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Plan Type</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.plan_type or "N/A"}</td>
             </tr>
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Account Status</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.account_status or "N/A"}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Account Status</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.account_status or "N/A"}</td>
             </tr>
         </table>
 
-        <h3>Request Type: {request_obj.get_request_type_display()}</h3>
+        <h3 style="margin:20px 0 8px;">Request Type: {request_obj.get_request_type_display()}</h3>
         <p>{description}</p>
 
-        <h3>Data Categories Affected</h3>
+        <h3 style="margin:20px 0 8px;">Data Categories Affected</h3>
         <p><em>
-            <!-- TODO: Insert specific data categories for this request type once the retention
-                 category list is provided. For Export: all profile, route, permit, and billing
-                 data associated with the account will be included. -->
             For this request type, all eligible personal data associated with your RightRoute
             account will be processed as described above.
         </em></p>
 
         {irreversibility_warning}
 
-        <h3>How to Approve This Request</h3>
+        <h3 style="margin:20px 0 8px;">How to Approve This Request</h3>
         <p>Please reply to this email with your explicit confirmation that you authorise
         RightRoute to perform the action described above. Include in your reply:</p>
         <ul>
@@ -132,12 +171,12 @@ def build_approval_email_body(request_obj, personal_message=""):
         <p><strong>Important:</strong> RightRoute will not take any action until we receive
         your written approval. If you did not submit this request, please contact us immediately.</p>
 
-        <br>
-        <p>Kind regards,<br>
+        <p style="margin-top:24px;">Kind regards,<br>
         <strong>RightRoute Support Team</strong></p>
-    </body>
-    </html>
-    """
+        """
+        + _email_footer()
+        + "</body></html>"
+    )
     return body.strip()
 
 
@@ -189,46 +228,48 @@ def build_completion_email_body(request_obj):
         It is not publicly accessible and can only be used once from your device.</p>
         """
 
-    body = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto;">
-        <h2>RightRoute — Data Request Completed</h2>
+    logo_url = _get_logo_url()
+    body = (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
+        "<body style='margin:0;padding:20px 0;background:#f5f5f5;'>"
+        + _email_header(logo_url)
+        + f"""
         <p>Dear {request_obj.customer_name or request_obj.customer_email},</p>
         <p>Your data protection request <strong>{request_obj.request_id}</strong> has been
         completed. Below is a full summary.</p>
 
-        <h3>Request Details</h3>
-        <table style="border-collapse: collapse; width: 100%;">
+        <h3 style="margin:20px 0 8px;">Request Details</h3>
+        <table style="border-collapse:collapse;width:100%;font-size:15px;">
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Request ID</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.request_id}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Request ID</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.request_id}</td>
             </tr>
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Request Type</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.get_request_type_display()}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Request Type</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.get_request_type_display()}</td>
             </tr>
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Date Requested</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.date_requested.strftime("%d %B %Y, %H:%M UTC")}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Date Requested</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.date_requested.strftime("%d %B %Y, %H:%M UTC")}</td>
             </tr>
             <tr>
-                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold;">Completed On</td>
-                <td style="padding: 6px; border: 1px solid #ddd;">{request_obj.completed_at.strftime("%d %B %Y, %H:%M UTC") if request_obj.completed_at else "N/A"}</td>
+                <td style="padding:6px;border:1px solid #ddd;font-weight:bold;">Completed On</td>
+                <td style="padding:6px;border:1px solid #ddd;">{request_obj.completed_at.strftime("%d %B %Y, %H:%M UTC") if request_obj.completed_at else "N/A"}</td>
             </tr>
         </table>
 
         {download_section}
 
-        <h3>Correspondence &amp; Notes</h3>
+        <h3 style="margin:20px 0 8px;">Correspondence &amp; Notes</h3>
         {notes_html or "<p><em>No notes recorded.</em></p>"}
 
-        <br>
-        <p>If you have questions, please contact our support team.</p>
+        <p style="margin-top:24px;">If you have questions, please contact our support team.</p>
         <p>Kind regards,<br>
         <strong>RightRoute Support Team</strong></p>
-    </body>
-    </html>
-    """
+        """
+        + _email_footer()
+        + "</body></html>"
+    )
     return body.strip()
 
 
@@ -255,21 +296,23 @@ def send_team_request_received_email(request_obj):
     except Exception:
         return ""
 
-    body = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto;">
-        <h2>RightRoute — Data Protection Request Received</h2>
+    logo_url = _get_logo_url()
+    body = (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
+        "<body style='margin:0;padding:20px 0;background:#f5f5f5;'>"
+        + _email_header(logo_url)
+        + f"""
         <p>Dear {request_obj.customer_name or request_obj.customer_email},</p>
         <p>We have received your data protection request (ID: <strong>{request_obj.request_id}</strong>).</p>
         <p><strong>Request Type:</strong> {request_obj.get_request_type_display()}</p>
         <p><strong>Date Requested:</strong> {request_obj.date_requested.strftime("%d %B %Y, %H:%M UTC")}</p>
         <p>Our security and compliance team will review your request and contact you soon to verify and process it.</p>
-        <br>
-        <p>Kind regards,<br>
+        <p style="margin-top:24px;">Kind regards,<br>
         <strong>RightRoute Security &amp; Compliance Team</strong></p>
-    </body>
-    </html>
-    """
+        """
+        + _email_footer()
+        + "</body></html>"
+    )
     subject = f"RightRoute Data Protection Request Received ({request_obj.request_id})"
     try:
         _send(subject, body, request_obj.customer_email, config, conn)

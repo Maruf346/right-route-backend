@@ -1,310 +1,106 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
     <meta charset="utf-8">
-    <title>Team Invitation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Invitation - RightRoute</title>
 </head>
 
-<body style="margin:0;padding:0;background:#f3f7fb;font-family:Arial,Helvetica,sans-serif;">
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
 
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f7fb;padding:30px 0;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:30px 0;">
         <tr>
             <td align="center">
 
-                <table width="650" cellpadding="0" cellspacing="0"
-                    style="background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.08);">
+                <table width="600" cellpadding="0" cellspacing="0"
+                    style="background:#ffffff;border:1px solid #e0e0e0;border-radius:4px;overflow:hidden;">
 
-                    <!-- Header -->
+                    <!-- Logo Header -->
                     <tr>
-                        <td align="center"
-                            style="background:linear-gradient(135deg,#0f766e,#14b8a6);padding:45px 30px;">
+                        <td align="center" style="padding:32px 40px 24px;">
+                            <img src="{{ logo_url }}" alt="RightRoute - Oversized Load Navigator"
+                                width="220" style="display:block;max-width:220px;height:auto;border:0;">
+                        </td>
+                    </tr>
 
-                            <div style="
-                                width:80px;
-                                height:80px;
-                                line-height:80px;
-                                background:rgba(255,255,255,0.15);
-                                border-radius:50%;
-                                font-size:38px;
-                                color:#ffffff;
-                                margin:auto;">
-                                🛣️
-                            </div>
-
-                            <h1 style="
-                                color:#ffffff;
-                                margin:20px 0 10px;
-                                font-size:32px;
-                                font-weight:700;">
-                                Right Routes
-                            </h1>
-
-                            <p style="
-                                color:#d1fae5;
-                                margin:0;
-                                font-size:16px;">
-                                Route Navigation & Permit Management Platform
-                            </p>
-
+                    <!-- Divider -->
+                    <tr>
+                        <td style="padding:0 40px;">
+                            <hr style="border:none;border-top:1px solid #e0e0e0;margin:0;">
                         </td>
                     </tr>
 
                     <!-- Content -->
                     <tr>
-                        <td style="padding:45px 40px;">
+                        <td style="padding:32px 40px;">
 
-                            <h2 style="
-                                margin-top:0;
-                                color:#0f172a;
-                                font-size:28px;">
-                                You're Invited to Join a Team
-                            </h2>
-
-                            <p style="
-                                color:#475569;
-                                font-size:16px;
-                                line-height:1.8;">
+                            <p style="margin:0 0 16px;font-size:16px;color:#222222;line-height:1.6;">
                                 Hello <strong>{{ invited_email }}</strong>,
                             </p>
 
-                            <p style="
-                                color:#475569;
-                                font-size:16px;
-                                line-height:1.8;">
-                                Great news! You have been invited to join the
-                                <strong>{{ team_name }}</strong> team on
-                                <strong>Right Routes</strong>.
+                            <p style="margin:0 0 16px;font-size:16px;color:#222222;line-height:1.6;">
+                                You have been invited to join the <strong>{{ team_name }}</strong> Team
+                                on RightRoute. Since you already have a RightRoute account, simply
+                                click the button below to accept your invitation.
                             </p>
 
-                            <p style="
-                                color:#475569;
-                                font-size:16px;
-                                line-height:1.8;">
-                                Since you already have a Right Routes account,
-                                accepting this invitation is quick and easy.
-                                Simply click the button below, sign in if prompted,
-                                and you'll be able to access your new team immediately.
+                            <!-- Accept Button -->
+                            <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
+                                <tr>
+                                    <td align="left">
+                                        <a href="{{ accept_link }}"
+                                            style="display:inline-block;background:#e8871a;color:#ffffff;text-decoration:none;padding:14px 32px;font-size:16px;font-weight:bold;border-radius:4px;">
+                                            Accept Invitation
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <p style="margin:0 0 16px;font-size:14px;color:#555555;line-height:1.6;">
+                                If the button above does not work, copy and paste the link below into your browser:
                             </p>
 
-                            <div style="
-                                background:#ecfeff;
-                                border:1px solid #99f6e4;
-                                border-left:5px solid #14b8a6;
-                                border-radius:12px;
-                                padding:20px;
-                                margin:30px 0;">
-
-                                <h3 style="
-                                    margin-top:0;
-                                    color:#115e59;
-                                    font-size:18px;">
-                                    What happens next?
-                                </h3>
-
-                                <ul style="
-                                    color:#334155;
-                                    padding-left:20px;
-                                    margin-bottom:0;
-                                    line-height:1.8;">
-
-                                    <li>Sign in to your existing Right Routes account.</li>
-
-                                    <li>Review your team invitation.</li>
-
-                                    <li>Accept the invitation.</li>
-
-                                    <li>Start collaborating with your new team immediately.</li>
-
-                                </ul>
-
-                            </div>
-
-                            <div style="
-                                background:#f8fafc;
-                                border:1px solid #e2e8f0;
-                                border-radius:14px;
-                                padding:25px;
-                                margin:30px 0;">
-
-                                <p style="margin:0 0 12px;color:#334155;">
-                                    <strong>Team Name:</strong>
-                                    {{ team_name }}
-                                </p>
-
-                                <p style="margin:0 0 12px;color:#334155;">
-                                    <strong>Invited Email:</strong>
-                                    {{ invited_email }}
-                                </p>
-
-                                <p style="margin:0;color:#334155;">
-                                    <strong>Invitation Expires:</strong>
-                                    {{ expires_at }}
-                                </p>
-
-                            </div>
-                            <div style="text-align:center;margin:40px 0;">
-
-                                <a href="{{ accept_link }}" style="
-                                        background:linear-gradient(135deg,#0f766e,#14b8a6);
-                                        color:#ffffff;
-                                        text-decoration:none;
-                                        padding:16px 36px;
-                                        border-radius:10px;
-                                        font-size:16px;
-                                        font-weight:600;
-                                        display:inline-block;">
-                                    View Invitation
-                                </a>
-
-                            </div>
-
-                            <p style="
-                                color:#64748b;
-                                font-size:15px;
-                                line-height:1.8;">
-                                If the button above doesn't work, copy and paste
-                                the following link into your browser:
-                            </p>
-
-                            <div style="
-                                background:#f8fafc;
-                                border:1px solid #e2e8f0;
-                                padding:15px;
-                                border-radius:8px;
-                                word-break:break-all;
-                                color:#0f766e;
-                                font-size:14px;">
-
+                            <p style="margin:0 0 24px;font-size:14px;color:#1a73e8;line-height:1.6;word-break:break-all;">
                                 {{ accept_link }}
-
-                            </div>
-
-                            <div style="
-                                margin-top:35px;
-                                background:#fefce8;
-                                border-left:5px solid #eab308;
-                                padding:20px;
-                                border-radius:10px;">
-
-                                <strong style="
-                                    color:#854d0e;
-                                    font-size:16px;">
-                                    Important
-                                </strong>
-
-                                <p style="
-                                    margin:12px 0 0;
-                                    color:#713f12;
-                                    line-height:1.8;">
-
-                                    This invitation will expire on
-                                    <strong>{{ expires_at }}</strong>.
-
-                                </p>
-
-                                <p style="
-                                    margin:15px 0 0;
-                                    color:#713f12;
-                                    line-height:1.8;">
-
-                                    Please sign in using the same email address
-                                    (<strong>{{ invited_email }}</strong>)
-                                    to access your invitation.
-
-                                </p>
-
-                                <p style="
-                                    margin:15px 0 0;
-                                    color:#713f12;
-                                    line-height:1.8;">
-
-                                    If you weren't expecting this invitation,
-                                    you can safely ignore this email.
-
-                                </p>
-
-                            </div>
-
-                            <p style="
-                                margin-top:40px;
-                                color:#475569;
-                                font-size:16px;
-                                line-height:1.8;">
-
-                                We're excited to have you join
-                                <strong>{{ team_name }}</strong>
-                                and look forward to working together.
-
                             </p>
 
-                            <p style="
-                                margin-top:35px;
-                                color:#475569;
-                                font-size:16px;">
+                            <p style="margin:0 0 16px;font-size:16px;color:#222222;line-height:1.6;">
+                                <strong>Important:</strong> If you were not expecting this invitation,
+                                you can safely ignore this email.
+                            </p>
 
-                                Best regards,<br>
-                                <strong>Right Routes Team</strong>
-
+                            <p style="margin:0 0 4px;font-size:16px;color:#222222;">
+                                This invitation expires on <strong>{{ expires_at }}</strong>.
                             </p>
 
                         </td>
                     </tr>
 
+                    <!-- Divider -->
+                    <tr>
+                        <td style="padding:0 40px;">
+                            <hr style="border:none;border-top:1px solid #e0e0e0;margin:0;">
+                        </td>
+                    </tr>
+
                     <!-- Footer -->
                     <tr>
-                        <td align="center" style="
-                                background:#f8fafc;
-                                border-top:1px solid #e2e8f0;
-                                padding:30px;">
+                        <td style="padding:24px 40px;">
 
-                            <h3 style="
-                                margin:0;
-                                color:#0f172a;">
-                                Right Routes
-                            </h3>
-
-                            <p style="
-                                margin:10px 0;
-                                color:#64748b;
-                                font-size:14px;">
-                                Route Navigation & Permit Management System
-                            </p>
-                            <p style="
-                                color:#94a3b8;
-                                font-size:13px;
-                                margin-top:15px;">
-                                © 2026 Right Routes. All Rights Reserved.
-                            </p>
-
-                            <p style="
-                                color:#94a3b8;
-                                font-size:12px;
-                                line-height:1.7;
-                                margin-top:10px;">
-                                This is an automated email sent by Right Routes.
-                                Please do not reply to this email.
+                            <p style="margin:0;font-size:14px;color:#444444;line-height:1.8;">
+                                Thank you,<br>
+                                The RightRoute Team<br><br>
+                                RightRoute&trade;<br>
+                                &copy; 2026 Leavitt &amp; Davis LLC. All Rights Reserved.<br>
+                                1-888-603-6317<br>
+                                This is an automated email. Please do not reply.
                             </p>
 
                         </td>
                     </tr>
 
                 </table>
-
-                <div style="
-                    margin-top:20px;
-                    color:#94a3b8;
-                    font-size:12px;
-                    text-align:center;
-                    line-height:1.7;">
-
-                    You received this email because someone invited
-                    <strong>{{ invited_email }}</strong>
-                    to join the
-                    <strong>{{ team_name }}</strong>
-                    team on Right Routes.
-
-                </div>
 
             </td>
         </tr>
