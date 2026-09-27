@@ -593,21 +593,203 @@ docker compose --env-file .deploy.env -f docker-compose.prod.yml exec backend py
 
 ---
 
-## 15. Later domain and SSL setup
+## 15. Domain and SSL setup
 
-After domain DNS points to the Elastic IP:
+Use this section after the API DNS record has already been added at the domain provider.
 
-1. Add an A record:
+Expected DNS record:
 
 ```text
 api.yourdomain.com -> YOUR_ELASTIC_IP
 ```
 
-2. Update `/opt/rightroute-backend/production.env`:
+Replace `api.yourdomain.com` with the real API domain everywhere below.
+
+### 15.1 Verify DNS points to the EC2 Elastic IP
+
+From your local computer or from the EC2 server, check DNS:
+
+```bash
+nslookup api.yourdomain.com
+```
+
+or:
+
+```bash
+dig api.yourdomain.com +short
+```
+
+The result should show the EC2 Elastic IP. If it does not show the Elastic IP yet, wait for DNS propagation before continuing.
+
+### 15.2 Confirm EC2 security group allows HTTPS
+
+Go to **EC2 -> Security Groups -> rightroute-backend-prod-sg** and confirm inbound rules include:
+
+| Type | Protocol | Port | Source |
+| --- | --- | --- | --- |
+| HTTP | TCP | 80 | `0.0.0.0/0` |
+| HTTPS | TCP | 443 | `0.0.0.0/0` |
+| SSH | TCP | 22 | Your IP only |
+
+Do not open port `8003` publicly.
+
+### 15.3 Install Certbot on EC2
+
+SSH into EC2 with Putty, then run:
+
+```bash
+sudo apt update
+sudo apt install -y certbot
+```
+
+Check Certbot:
+
+```bash
+certbot --version
+```
+
+### 15.4 Stop Docker Nginx temporarily for certificate issuance
+
+Certbot standalone mode needs port `80` free. Because our Docker Nginx container already uses port `80`, stop the Compose stack temporarily:
+
+```bash
+cd /opt/rightroute-backend
+docker compose --env-file .deploy.env -f docker-compose.prod.yml down
+```
+
+Now issue the certificate:
+
+```bash
+sudo certbot certonly --standalone -d api.yourdomain.com
+```
+
+When Certbot asks for an email, use the admin/owner email. Accept the Terms of Service. Marketing emails are optional.
+
+After success, Certbot will create files like:
+
+```text
+/etc/letsencrypt/live/api.yourdomain.com/fullchain.pem
+/etc/letsencrypt/live/api.yourdomain.com/privkey.pem
+```
+
+### 15.5 Update Nginx config for HTTPS
+
+Edit the Nginx config on EC2:
+
+```bash
+nano /opt/rightroute-backend/nginx/conf.d/right-route.conf
+```
+
+Replace the file content with this, changing `api.yourdomain.com` to the real domain:
+
+```nginx
+server {
+    listen 80;
+    server_name api.yourdomain.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name api.yourdomain.com;
+
+    client_max_body_size 200M;
+
+    ssl_certificate /etc/letsencrypt/live/api.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.yourdomain.com/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    location /static/ {
+        alias /app/staticfiles/;
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000";
+    }
+
+    location / {
+        proxy_pass http://backend:8003;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_redirect off;
+    }
+}
+```
+
+### 15.6 Update Docker Compose to mount certificates
+
+Edit Compose on EC2:
+
+```bash
+nano /opt/rightroute-backend/docker-compose.prod.yml
+```
+
+In the `nginx` service, make sure ports include both `80` and `443`:
+
+```yaml
+    ports:
+      - "80:80"
+      - "443:443"
+```
+
+In the `nginx` service volumes, add the Let's Encrypt certificates and Certbot webroot mounts:
+
+```yaml
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - staticfiles:/app/staticfiles:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+```
+
+The full `nginx` service should look like this:
+
+```yaml
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: right_route_nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - staticfiles:/app/staticfiles:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    restart: unless-stopped
+```
+
+### 15.7 Update production.env for HTTPS
+
+Edit production env:
+
+```bash
+nano /opt/rightroute-backend/production.env
+```
+
+Update these values:
 
 ```env
 ALLOWED_HOSTS=api.yourdomain.com,YOUR_ELASTIC_IP,localhost,127.0.0.1
 CSRF_TRUSTED_ORIGINS=https://api.yourdomain.com
+CORS_ALLOWED_ORIGINS=https://YOUR_FRONTEND_DOMAIN
+FRONTEND_URL=https://YOUR_FRONTEND_DOMAIN
 SITE_URL=https://api.yourdomain.com
 SECURE_SSL_REDIRECT=True
 SESSION_COOKIE_SECURE=True
@@ -617,24 +799,106 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS=True
 SECURE_HSTS_PRELOAD=False
 ```
 
-3. Update `nginx/conf.d/right-route.conf` for the domain and SSL.
-4. Install Certbot on EC2 or run a Certbot container.
-5. Issue certificate:
+If the frontend is not on HTTPS yet, keep `CORS_ALLOWED_ORIGINS` and `FRONTEND_URL` matching the actual frontend URL for now.
+
+### 15.8 Restart production containers
+
+Start the app again:
 
 ```bash
-sudo certbot certonly --standalone -d api.yourdomain.com
+cd /opt/rightroute-backend
+docker compose --env-file .deploy.env -f docker-compose.prod.yml up -d
 ```
 
-6. Add a renewal test:
+Check containers:
 
 ```bash
-sudo certbot renew --dry-run
+docker compose --env-file .deploy.env -f docker-compose.prod.yml ps
 ```
 
-Certbot installs a systemd timer automatically on Ubuntu packages. Verify:
+Check logs:
+
+```bash
+docker logs right_route_backend --tail 100
+docker logs right_route_nginx --tail 100
+```
+
+Test the API:
+
+```bash
+curl -I http://api.yourdomain.com/
+curl -I https://api.yourdomain.com/
+```
+
+Expected result:
+
+- `http://api.yourdomain.com/` redirects to HTTPS.
+- `https://api.yourdomain.com/` returns a valid response from the API.
+
+Also open in browser:
+
+```text
+https://api.yourdomain.com/
+https://api.yourdomain.com/api/docs/
+```
+
+### 15.9 Set up certificate renewal
+
+Certbot installed through Ubuntu usually creates a systemd timer automatically. Check it:
 
 ```bash
 systemctl list-timers | grep certbot
 ```
 
-When SSL is added, port `443` must be open in the EC2 security group.
+Test renewal:
+
+```bash
+sudo certbot renew --dry-run
+```
+
+Because Nginx is running in Docker and using the certificates as read-only mounted files, renewals should update files under `/etc/letsencrypt`. After renewal, reload/restart Docker Nginx so it picks up the renewed certificate:
+
+```bash
+cd /opt/rightroute-backend
+docker compose --env-file .deploy.env -f docker-compose.prod.yml restart nginx
+```
+
+To automate Nginx restart after successful renewal, create a deploy hook:
+
+```bash
+sudo nano /etc/letsencrypt/renewal-hooks/deploy/restart-rightroute-nginx.sh
+```
+
+Paste:
+
+```bash
+#!/bin/bash
+cd /opt/rightroute-backend
+/usr/bin/docker compose --env-file .deploy.env -f docker-compose.prod.yml restart nginx
+```
+
+Make it executable:
+
+```bash
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-rightroute-nginx.sh
+```
+
+Run another dry test:
+
+```bash
+sudo certbot renew --dry-run
+```
+
+### 15.10 Important note for future GitHub deployments
+
+The GitHub deployment workflow copies the repository version of `nginx/conf.d/right-route.conf` and `docker-compose.prod.yml` to EC2 on every deployment.
+
+After SSL is enabled, make sure the SSL-ready versions are also committed in the repository. Otherwise, the next GitHub deployment can overwrite the EC2 SSL config with the old HTTP-only config.
+
+Recommended flow:
+
+1. Update the local repo files:
+   - `nginx/conf.d/right-route.conf`
+   - `docker-compose.prod.yml`
+2. Commit and push them.
+3. Then run the GitHub deployment again.
