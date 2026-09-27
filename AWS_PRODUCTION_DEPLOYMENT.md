@@ -457,7 +457,7 @@ Important values before first deploy:
 ```env
 SECRET_KEY=real-long-secret
 DEBUG=False
-ALLOWED_HOSTS=YOUR_ELASTIC_IP
+ALLOWED_HOSTS=YOUR_ELASTIC_IP,localhost,127.0.0.1
 CSRF_TRUSTED_ORIGINS=http://YOUR_ELASTIC_IP
 USE_POSTGRES=True
 POSTGRES_DB=rightroute_prod
@@ -606,7 +606,7 @@ api.yourdomain.com -> YOUR_ELASTIC_IP
 2. Update `/opt/rightroute-backend/production.env`:
 
 ```env
-ALLOWED_HOSTS=api.yourdomain.com,YOUR_ELASTIC_IP
+ALLOWED_HOSTS=api.yourdomain.com,YOUR_ELASTIC_IP,localhost,127.0.0.1
 CSRF_TRUSTED_ORIGINS=https://api.yourdomain.com
 SITE_URL=https://api.yourdomain.com
 SECURE_SSL_REDIRECT=True
