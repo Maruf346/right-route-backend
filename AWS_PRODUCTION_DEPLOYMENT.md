@@ -850,13 +850,72 @@ Certbot installed through Ubuntu usually creates a systemd timer automatically. 
 systemctl list-timers | grep certbot
 ```
 
-Test renewal:
+If the first certificate was issued with `certbot certonly --standalone`, a plain renewal test may fail while Docker Nginx is running:
+
+```text
+Could not bind TCP port 80 because it is already in use
+```
+
+That happens because standalone renewal tries to temporarily run its own web server on port `80`, but Docker Nginx already owns port `80`. For production, switch this certificate to **webroot renewal** so Nginx can stay running.
+
+Create the webroot directory on the EC2 host:
+
+```bash
+sudo mkdir -p /var/www/certbot/.well-known/acme-challenge
+sudo chown -R ubuntu:ubuntu /var/www/certbot
+```
+
+Confirm `docker-compose.prod.yml` mounts the webroot into Nginx:
+
+```yaml
+      - /var/www/certbot:/var/www/certbot:ro
+```
+
+Confirm the HTTP server block in `/opt/rightroute-backend/nginx/conf.d/right-route.conf` contains this before the redirect:
+
+```nginx
+location /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+}
+```
+
+Restart Nginx:
+
+```bash
+cd /opt/rightroute-backend
+docker compose --env-file .deploy.env -f docker-compose.prod.yml restart nginx
+```
+
+Test that Nginx can serve challenge files:
+
+```bash
+echo "certbot-ok" > /var/www/certbot/.well-known/acme-challenge/test.txt
+curl http://api.getrightroute.app/.well-known/acme-challenge/test.txt
+rm /var/www/certbot/.well-known/acme-challenge/test.txt
+```
+
+Expected output:
+
+```text
+certbot-ok
+```
+
+Now re-save the certificate renewal config using webroot:
+
+```bash
+sudo certbot certonly --webroot \
+  -w /var/www/certbot \
+  -d api.getrightroute.app \
+  --cert-name api.getrightroute.app
+```
+
+After that, test renewal:
 
 ```bash
 sudo certbot renew --dry-run
 ```
 
-Because Nginx is running in Docker and using the certificates as read-only mounted files, renewals should update files under `/etc/letsencrypt`. After renewal, reload/restart Docker Nginx so it picks up the renewed certificate:
+Because Nginx is running in Docker and using the certificates as read-only mounted files, renewals update files under `/etc/letsencrypt`. After renewal, reload/restart Docker Nginx so it picks up the renewed certificate:
 
 ```bash
 cd /opt/rightroute-backend
@@ -888,7 +947,6 @@ Run another dry test:
 ```bash
 sudo certbot renew --dry-run
 ```
-
 ### 15.10 Important note for future GitHub deployments
 
 The GitHub deployment workflow copies the repository version of `nginx/conf.d/right-route.conf` and `docker-compose.prod.yml` to EC2 on every deployment.
