@@ -221,19 +221,121 @@ Architecture: 64-bit x86
 
 Use `t3.small` for a light initial production launch. Use `t3.medium` if you expect heavier API traffic, larger route-processing jobs, or more background/server load. The app will run Docker, Nginx, and Gunicorn on this server, so avoid `t2.micro`/`t3.micro` for production unless it is only a temporary smoke test.
 
-Key pair:
+AMI / operating system:
 
-1. Create or select an existing EC2 key pair.
-2. Key pair type: **RSA**.
-3. Private key format: **.pem** if you will convert it with Puttygen, or **.ppk** if AWS offers that option in your console flow.
-4. Download and store the private key safely. AWS will not let you download it again.
+1. In **Application and OS Images**, choose **Ubuntu**.
+2. Select **Ubuntu Server 24.04 LTS**.
+3. Select the normal **64-bit x86** AMI unless you intentionally choose an ARM instance type.
+4. Keep note of the default username for this AMI:
+
+```text
+ubuntu
+```
+
+This username is needed later for Putty and GitHub Actions:
+
+```text
+EC2_USER=ubuntu
+```
+
+Instance type:
+
+1. Choose `t3.small` for the first production deployment.
+2. Choose `t3.medium` if budget allows and you want more comfortable memory/CPU headroom.
+3. Do not choose `micro` for a real production deployment because Docker, Nginx, Gunicorn, migrations, and route-related processing can use more memory than a micro instance comfortably provides.
+
+Key pair for SSH / Putty:
+
+1. In **Key pair (login)**, choose **Create new key pair** unless you already have a production key pair.
+2. Key pair name:
+
+```text
+rightroute-prod-key
+```
+
+3. Key pair type: **RSA**.
+4. Private key file format:
+
+```text
+.pem
+```
+
+5. Download the `.pem` file and store it safely. AWS will not let you download it again.
+6. For Putty, convert the `.pem` file to `.ppk` using **Puttygen**:
+   - Open Puttygen.
+   - Click **Load**.
+   - Select the downloaded `.pem` file.
+   - Click **Save private key**.
+   - Save it as something like `rightroute-prod-key.ppk`.
+7. Keep both files private. Do not commit them to GitHub and do not paste them into chat.
 
 Network settings:
 
-1. VPC: use the same VPC that the RDS database uses.
-2. Subnet: choose a public subnet, because this EC2 instance needs to receive HTTP traffic through the Elastic IP.
-3. Auto-assign public IP: you can enable it for first access, but the final stable address will be the Elastic IP from the next step.
-4. IAM instance profile: attach the EC2 IAM role created earlier with ECR pull access and S3 media bucket access.
+1. VPC: select the same VPC used by the RDS database from step 5.
+2. Subnet: choose a **public subnet** in that VPC.
+3. Auto-assign public IP: enable it for first access if needed. The permanent IP will be attached in step 8 using Elastic IP.
+4. IAM instance profile: attach the EC2 IAM role created in step 6. This role should allow:
+   - Pulling Docker images from ECR.
+   - Reading/writing media files in the S3 bucket.
+5. If the IAM role does not show in the EC2 launch screen, finish creating the instance first, then attach it from:
+
+```text
+EC2 -> Instances -> select instance -> Actions -> Security -> Modify IAM role
+```
+
+Create/select EC2 security group:
+
+Use a dedicated security group for this backend server. Recommended name:
+
+```text
+rightroute-backend-prod-sg
+```
+
+Inbound rules:
+
+| Type | Protocol | Port | Source | Notes |
+| --- | --- | --- | --- | --- |
+| SSH | TCP | 22 | Your current IP only | Required for Putty access. Do not use `0.0.0.0/0` for SSH. |
+| HTTP | TCP | 80 | `0.0.0.0/0` | Required now for Elastic IP access through Nginx. |
+| HTTPS | TCP | 443 | `0.0.0.0/0` | Add now or later. Required when domain + SSL are added. |
+
+For SSH source, choose **My IP** in the AWS console. It should create a rule like:
+
+```text
+YOUR_PUBLIC_IP/32
+```
+
+If your internet IP changes later, update the SSH rule to your new IP. Do not open SSH to everyone unless it is a very temporary emergency and you close it immediately after.
+
+Do not add these inbound rules to EC2:
+
+```text
+8003 from 0.0.0.0/0
+5432 from 0.0.0.0/0
+```
+
+Reason:
+
+- Port `8003` is the internal Gunicorn app port. Nginx will reach it inside Docker, so the public internet should not reach it directly.
+- Port `5432` belongs to PostgreSQL/RDS. EC2 does not need to expose PostgreSQL publicly.
+
+Outbound rules:
+
+Keep the default outbound rule:
+
+| Type | Protocol | Port | Destination | Notes |
+| --- | --- | --- | --- | --- |
+| All traffic | All | All | `0.0.0.0/0` | Lets EC2 install packages, pull ECR images, reach RDS, and access S3. |
+
+RDS security group reminder:
+
+After the EC2 security group is created, go back to the RDS security group and make sure PostgreSQL allows inbound traffic from the EC2 security group:
+
+| Type | Protocol | Port | Source |
+| --- | --- | --- | --- |
+| PostgreSQL | TCP | 5432 | `rightroute-backend-prod-sg` |
+
+Do not use `0.0.0.0/0` for the RDS PostgreSQL rule.
 
 Storage:
 
@@ -245,29 +347,26 @@ Encryption: enabled if available
 
 30 GB is enough for the first deployment because Docker images, logs, and static files will live on the server. If image builds/deployments grow, increase this to 50 GB or more. RDS stores the database separately, and S3 stores media files separately.
 
-Security group inbound rules:
+Advanced details:
 
-- SSH `22` from your IP only
-- HTTP `80` from `0.0.0.0/0`
-- HTTPS `443` from `0.0.0.0/0` later when SSL is added
+1. Keep **termination protection** enabled if available, especially after production is live.
+2. Keep the default root volume delete-on-termination behavior only if you are comfortable recreating the server from CI/CD. The important persistent data should be in RDS and S3.
+3. Add useful tags:
 
-Security group outbound rules:
+```text
+Name=rightroute-backend-prod
+Project=RightRoute
+Environment=Production
+```
 
-- Keep outbound traffic open by default so the server can pull packages, pull ECR images, reach RDS, and communicate with S3.
+Review and launch:
 
-Important security notes:
-
-- Do not open port `8003` publicly. Nginx will proxy to it internally.
-- Do not open PostgreSQL port `5432` on the EC2 security group. RDS should allow `5432` inbound only from the EC2 security group.
-- Do not put AWS access keys inside the EC2 server if the IAM role is attached correctly.
-- Restrict SSH to your current IP. If your IP changes, update the security group rule instead of opening SSH to everyone.
-
-After launch:
-
-1. Wait until instance state is **Running**.
-2. Confirm status checks are passing.
-3. Copy the instance ID and public IPv4 address temporarily.
-4. Continue to the Elastic IP step and associate a permanent Elastic IP with this instance.
+1. Click **Launch instance**.
+2. Wait until instance state is **Running**.
+3. Wait until both status checks pass.
+4. Copy the instance ID.
+5. Copy the temporary public IPv4 address only for initial reference.
+6. Continue to step 8 and associate a permanent Elastic IP with this instance.
 
 ---
 ## 8. Allocate and attach Elastic IP
