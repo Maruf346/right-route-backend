@@ -5,11 +5,13 @@ charset-normalizer==3.4.7
 clamd==1.0.2
 diff-match-patch==20241021
 Django==6.0.6
+boto3==1.42.0
 django-auditlog==3.4.1
 django-cors-headers==4.9.0
 django-extensions==4.1
 django-filter==25.2
 django-import-export==4.4.1
+django-storages==1.14.6
 django-simple-history==3.11.0
 djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1
@@ -23,9 +25,11 @@ jsonschema-specifications==2025.9.1
 networkx==3.6.1
 numpy==2.5.1
 osmnx==2.1.0
+openpyxl==3.1.5
 packaging==26.2
 pandas==3.0.3
 pillow==12.2.0
+psycopg2-binary==2.9.11
 PyJWT==2.13.0
 pymupdf==1.28.2
 pyogrio==0.13.0

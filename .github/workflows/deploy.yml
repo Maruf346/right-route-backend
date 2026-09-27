@@ -1,0 +1,70 @@
+name: Deploy Backend to AWS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'rightroute-backend' }}
+  EC2_APP_DIR: ${{ vars.EC2_APP_DIR || '/opt/rightroute-backend' }}
+
+jobs:
+  deploy:
+    name: Build, Push, and Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" .
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_ENV"
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/right-route.pem
+          chmod 600 ~/.ssh/right-route.pem
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Copy production compose and nginx files
+        run: |
+          ssh -i ~/.ssh/right-route.pem "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "sudo mkdir -p $EC2_APP_DIR && sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} $EC2_APP_DIR"
+          scp -i ~/.ssh/right-route.pem docker-compose.prod.yml "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:$EC2_APP_DIR/docker-compose.prod.yml"
+          ssh -i ~/.ssh/right-route.pem "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "mkdir -p $EC2_APP_DIR/nginx/conf.d"
+          scp -i ~/.ssh/right-route.pem nginx/conf.d/right-route.conf "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:$EC2_APP_DIR/nginx/conf.d/right-route.conf"
+
+      - name: Deploy on EC2
+        run: |
+          ssh -i ~/.ssh/right-route.pem "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" << EOF
+            set -e
+            cd "$EC2_APP_DIR"
+            printf 'IMAGE_URI=%s\n' "$IMAGE_URI" > .deploy.env
+            aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ steps.ecr-login.outputs.registry }}"
+            docker compose --env-file .deploy.env -f docker-compose.prod.yml pull backend
+            docker compose --env-file .deploy.env -f docker-compose.prod.yml up -d
+            docker image prune -f
+          EOF

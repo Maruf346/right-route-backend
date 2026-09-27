@@ -3,15 +3,24 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 from datetime import timedelta
 import os
 
+def env_bool(name, default=False):
+    return os.getenv(name, str(default)).strip().lower() in ('true', '1', 'yes', 'on')
+
+def env_list(name, default=''):
+    value = os.getenv(name, default)
+    if not value or value.strip() == '*':
+        return []
+    return [item.strip() for item in value.split(',') if item.strip()]
+
 from dotenv import load_dotenv
 ENV_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(ENV_BASE_DIR, ".env"))
 
 
 SECRET_KEY = os.getenv("SECRET_KEY")
-DEBUG = os.getenv('DEBUG', 'False').strip().lower() in ('true', '1', 'yes')
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
-CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "*").split(",")
+DEBUG = env_bool('DEBUG', False)
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', '*') or ['*']
+CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
 
 
 # Application definition
@@ -117,7 +126,9 @@ SIMPLE_JWT = {
 #     "AUTH_HEADER_TYPES": ("Bearer",),
 # }
 
-CORS_ORIGIN_ALLOW_ALL = True
+CORS_ALLOW_ALL_ORIGINS = env_bool('CORS_ALLOW_ALL_ORIGINS', DEBUG)
+CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS')
+CORS_ALLOW_CREDENTIALS = env_bool('CORS_ALLOW_CREDENTIALS', True)
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Right Route API',
@@ -167,12 +178,28 @@ WSGI_APPLICATION = 'right_route_config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+if env_bool('USE_POSTGRES', False):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('POSTGRES_DB'),
+            'USER': os.getenv('POSTGRES_USER'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD'),
+            'HOST': os.getenv('POSTGRES_HOST'),
+            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+            'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '60')),
+            'OPTIONS': {
+                'sslmode': os.getenv('POSTGRES_SSLMODE', 'require'),
+            },
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -210,12 +237,60 @@ STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
-MEDIA_URL = 'media/'
+MEDIA_URL = "/media/"
 MEDIA_ROOT = os.getenv('MEDIA_ROOT', default=os.path.join(BASE_DIR, 'media'))
+
+STORAGES = {
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
+
+if env_bool('USE_S3', False):
+    INSTALLED_APPS += ['storages']
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', os.getenv('AWS_REGION', 'us-east-1'))
+    AWS_S3_SIGNATURE_VERSION = os.getenv('AWS_S3_SIGNATURE_VERSION', 's3v4')
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_DEFAULT_ACL = None
+    AWS_QUERYSTRING_AUTH = env_bool('AWS_QUERYSTRING_AUTH', False)
+    AWS_S3_CUSTOM_DOMAIN = os.getenv('AWS_S3_CUSTOM_DOMAIN')
+    AWS_LOCATION = os.getenv('AWS_LOCATION', 'media')
+
+    STORAGES['default'] = {
+        'BACKEND': 'storages.backends.s3.S3Storage',
+        'OPTIONS': {
+            'bucket_name': AWS_STORAGE_BUCKET_NAME,
+            'region_name': AWS_S3_REGION_NAME,
+            'location': AWS_LOCATION,
+            'file_overwrite': AWS_S3_FILE_OVERWRITE,
+            'default_acl': AWS_DEFAULT_ACL,
+            'querystring_auth': AWS_QUERYSTRING_AUTH,
+            'custom_domain': AWS_S3_CUSTOM_DOMAIN,
+        },
+    }
+    if AWS_S3_CUSTOM_DOMAIN:
+        MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/{AWS_LOCATION}/"
+    else:
+        MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/{AWS_LOCATION}/"
+else:
+    STORAGES['default'] = {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'account.User'
 
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = env_bool('USE_X_FORWARDED_HOST', True)
+SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', False)
+SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', not DEBUG)
+CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', not DEBUG)
+SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', False)
+SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', False)
 
 # default is ~2.5 MB; bump to e.g. 20 MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024
