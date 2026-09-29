@@ -35,8 +35,11 @@ urlpatterns = [
     path("team-member-invitation/", AcceptTeamMemberInvitation.as_view(), name="invitation-action"),
     
     path("auth/admin/login/",AdminLoginView.as_view(),name="admin-login"),
+    path("auth/admin/forget-password/", AdminForgetPasswordView.as_view(), name="admin-forget-password"),
+    path("auth/admin/reset-password/", AdminResetPasswordView.as_view(), name="admin-reset-password"),
     
     # TeamViewSet & AdminUserViewSet are registered with the router
     path("", include(router.urls))
 ]
+
 

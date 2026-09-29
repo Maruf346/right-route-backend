@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
@@ -160,6 +161,100 @@ class AdminLoginSuccessResponseSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     message = serializers.CharField()
     data = AdminLoginTokenDataSerializer()
+
+class AdminForgetPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        user = User.objects.filter(
+            email__iexact=value,
+            user_type=UserType.ADMIN,
+            is_staff=True,
+        ).first()
+        if not user:
+            raise serializers.ValidationError("Admin account not found.")
+        if not user.is_active:
+            raise serializers.ValidationError("Account is inactive.")
+        self.user = user
+        return user.email
+
+    def generate_otp(self):
+        return str(random.randint(100000, 999999))
+
+    def send_otp(self):
+        user = self.user
+        OTPVerification.objects.filter(
+            user=user,
+            email=user.email,
+            purpose=OTPPurpose.RESET,
+            is_verified=False,
+        ).delete()
+        otp_object = OTPVerification.objects.create(
+            user=user,
+            email=user.email,
+            purpose=OTPPurpose.RESET,
+            otp_code=self.generate_otp(),
+        )
+        EmailOTPSend(otp_object)
+        return otp_object
+
+
+class AdminResetPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    otp_code = serializers.CharField(max_length=6, min_length=6, write_only=True)
+    new_password = serializers.CharField(min_length=8, write_only=True)
+    confirm_password = serializers.CharField(min_length=8, write_only=True)
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        user = User.objects.filter(
+            email__iexact=value,
+            user_type=UserType.ADMIN,
+            is_staff=True,
+        ).first()
+        if not user:
+            raise serializers.ValidationError("Admin account not found.")
+        if not user.is_active:
+            raise serializers.ValidationError("Account is inactive.")
+        self.user = user
+        return user.email
+
+    def validate_new_password(self, value):
+        validate_password(value, user=getattr(self, "user", None))
+        return value
+
+    def validate(self, attrs):
+        if attrs.get("new_password") != attrs.get("confirm_password"):
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+
+        otp = OTPVerification.objects.filter(
+            user=self.user,
+            email=self.user.email,
+            otp_code=attrs.get("otp_code"),
+            purpose=OTPPurpose.RESET,
+            is_verified=False,
+        ).order_by("-created_at").first()
+
+        if not otp:
+            raise serializers.ValidationError({"otp_code": "Invalid OTP."})
+        if otp.is_expired:
+            raise serializers.ValidationError({"otp_code": "OTP expired."})
+
+        attrs["otp"] = otp
+        return attrs
+
+    def save(self):
+        otp = self.validated_data["otp"]
+        user = self.user
+        user.plain_password = self.validated_data["new_password"]
+        user.set_password(self.validated_data["new_password"])
+        user.save(update_fields=["password", "plain_password", "updated_at"])
+
+        otp.is_verified = True
+        otp.verified_at = timezone.now()
+        otp.save(update_fields=["is_verified", "verified_at"])
+        return user
 
 
 class AdminUserSerializer(serializers.ModelSerializer):
@@ -403,5 +498,6 @@ class AdminUserAccessResponseSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     message = serializers.CharField()
     data = AdminUserSerializer()
+
 
 

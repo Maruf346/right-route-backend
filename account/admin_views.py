@@ -24,6 +24,78 @@ from notification.models import ActivityLog
 from .utils import OwnAPIView
 
 
+@extend_schema(
+    tags=["Auth - Admin"],
+    operation_id="admin_forget_password",
+    summary="Admin forgot password",
+    description="Sends a password reset OTP to an admin dashboard user only.",
+    request=AdminForgetPasswordSerializer,
+    examples=[
+        OpenApiExample(
+            "Send Admin Reset OTP",
+            value={"email": "admin@example.com"},
+            request_only=True,
+        ),
+    ],
+    responses={200: OpenApiResponse(description="Password reset OTP sent.")},
+)
+class AdminForgetPasswordView(OwnAPIView):
+    serializer_class = AdminForgetPasswordSerializer
+    permission_classes = []
+
+    def success_response(self, serializer):
+        serializer.send_otp()
+        return Response(
+            {
+                "success": True,
+                "message": "Password reset OTP sent.",
+                "data": {
+                    "email": serializer.validated_data["email"],
+                    "next_step": "RESET_PASSWORD",
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(
+    tags=["Auth - Admin"],
+    operation_id="admin_reset_password",
+    summary="Admin reset password",
+    description="Verifies the reset OTP and sets a new password for an admin dashboard user only.",
+    request=AdminResetPasswordSerializer,
+    examples=[
+        OpenApiExample(
+            "Reset Admin Password",
+            value={
+                "email": "admin@example.com",
+                "otp_code": "123456",
+                "new_password": "NewStrongPass123!",
+                "confirm_password": "NewStrongPass123!",
+            },
+            request_only=True,
+        ),
+    ],
+    responses={200: OpenApiResponse(description="Password reset successful.")},
+)
+class AdminResetPasswordView(OwnAPIView):
+    serializer_class = AdminResetPasswordSerializer
+    permission_classes = []
+
+    def success_response(self, serializer):
+        serializer.save()
+        return Response(
+            {
+                "success": True,
+                "message": "Password reset successful.",
+                "data": {
+                    "email": serializer.validated_data["email"],
+                    "next_step": "LOGIN",
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
 class AdminLoginView(OwnAPIView):
     serializer_class = AdminLoginSerializer
     permission_classes = []
@@ -542,3 +614,4 @@ class AdminUserViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
