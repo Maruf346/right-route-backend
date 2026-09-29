@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes
 
+from core.constants import NotifyLogAction
 from core.permissions import HasAdminDashboardPermission
 from account.models import Team, User
 from subscription.models import UserSubscription
@@ -19,6 +20,7 @@ from finance.serializers import (
     FinanceSummarySerializer,
     FleetPaymentItemSerializer,
 )
+from notification.utils import log_activity
 from finance.utils import (
     parse_calendar_period,
     calculate_subscription_revenue,
@@ -257,6 +259,45 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, HasAdminDashboardPermission]
     required_admin_permission = "income_expenses.expenses"
     pagination_class = ExpensePagination
+
+    def _expense_metadata(self, expense):
+        return {
+            "vendor_company": expense.vendor_company,
+            "amount": str(expense.amount),
+            "date_paid": expense.date_paid.isoformat() if expense.date_paid else None,
+            "who_paid": expense.who_paid,
+            "payment_method": expense.payment_method,
+        }
+
+    def perform_create(self, serializer):
+        expense = serializer.save(created_by=self.request.user, updated_by=self.request.user)
+        log_activity(
+            self.request,
+            NotifyLogAction.CREATE,
+            expense,
+            "Expense created.",
+            self._expense_metadata(expense),
+        )
+
+    def perform_update(self, serializer):
+        expense = serializer.save(updated_by=self.request.user)
+        metadata = self._expense_metadata(expense)
+        metadata["updated_fields"] = list(self.request.data.keys())
+        log_activity(
+            self.request,
+            NotifyLogAction.UPDATE,
+            expense,
+            "Expense updated.",
+            metadata,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        expense = self.get_object()
+        metadata = self._expense_metadata(expense)
+        response = super().destroy(request, *args, **kwargs)
+        if response.status_code < 400:
+            log_activity(request, NotifyLogAction.DELETE, expense, "Expense deleted.", metadata)
+        return response
 
     def get_queryset(self):
         qs = super().get_queryset()

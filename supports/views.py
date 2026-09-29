@@ -11,6 +11,7 @@ from django.db.models import Q
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes
 
+from core.constants import NotifyLogAction
 from core.permissions import HasAdminDashboardPermission
 from account.models import User, AdminUserProfile, Team
 from team_dashboard.permissions import (
@@ -18,6 +19,7 @@ from team_dashboard.permissions import (
     HasTeamDashboardPermission,
     get_team_for_user,
 )
+from notification.utils import log_activity
 from supports.constants import (
     MainCategory,
     TicketPriority,
@@ -172,6 +174,46 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
         return qs.order_by("-created_at")
 
+    def _ticket_metadata(self, ticket):
+        return {
+            "ticket_number": ticket.ticket_number,
+            "customer_email": ticket.customer_email,
+            "subject": ticket.subject,
+            "status": ticket.status,
+            "priority": ticket.priority,
+            "assigned_to_id": ticket.assigned_to_id,
+        }
+
+    def perform_create(self, serializer):
+        ticket = serializer.save()
+        log_activity(
+            self.request,
+            NotifyLogAction.CREATE,
+            ticket,
+            "Support ticket created.",
+            self._ticket_metadata(ticket),
+        )
+
+    def perform_update(self, serializer):
+        ticket = serializer.save()
+        metadata = self._ticket_metadata(ticket)
+        metadata["updated_fields"] = list(self.request.data.keys())
+        log_activity(
+            self.request,
+            NotifyLogAction.UPDATE,
+            ticket,
+            "Support ticket updated.",
+            metadata,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        ticket = self.get_object()
+        metadata = self._ticket_metadata(ticket)
+        response = super().destroy(request, *args, **kwargs)
+        if response.status_code < 400:
+            log_activity(request, NotifyLogAction.DELETE, ticket, "Support ticket deleted.", metadata)
+        return response
+
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         instance.refresh_auto_status()
@@ -224,6 +266,10 @@ class TicketArchiveView(APIView):
             action_summary="Ticket moved to Archives and marked Closed",
             performed_by=request.user,
         )
+        log_activity(request, NotifyLogAction.UPDATE, ticket, "Support ticket archived.", {
+            "ticket_number": ticket.ticket_number,
+            "status": ticket.status,
+        })
         return Response(SupportTicketDetailSerializer(ticket).data)
 
 
@@ -266,6 +312,11 @@ class TicketAssignView(APIView):
             action_summary=f"Ticket assigned to {ticket.assigned_name or 'Unassigned'}",
             performed_by=request.user,
         )
+        log_activity(request, NotifyLogAction.UPDATE, ticket, "Support ticket assigned.", {
+            "ticket_number": ticket.ticket_number,
+            "assigned_to_id": ticket.assigned_to_id,
+            "assigned_name": ticket.assigned_name,
+        })
 
         if assignee_user:
             send_assignment_email(ticket, assignee_user, ticket.assigned_name)
@@ -315,7 +366,10 @@ class TicketCloneView(APIView):
             action_summary=f"Cloned from ticket {source_ticket.ticket_number}",
             performed_by=request.user,
         )
-
+        log_activity(request, NotifyLogAction.CREATE, new_ticket, "Support ticket cloned.", {
+            "ticket_number": new_ticket.ticket_number,
+            "source_ticket_number": source_ticket.ticket_number,
+        })
         return Response(SupportTicketDetailSerializer(new_ticket).data, status=status.HTTP_201_CREATED)
 
 
@@ -367,7 +421,10 @@ class TicketMessagesView(APIView):
             action_summary=f"Added {'internal note' if is_internal_note else 'response to customer'}",
             performed_by=request.user,
         )
-
+        log_activity(request, NotifyLogAction.UPDATE, ticket, "Support ticket message added.", {
+            "ticket_number": ticket.ticket_number,
+            "is_internal_note": is_internal_note,
+        })
         return Response(TicketMessageSerializer(message).data, status=status.HTTP_201_CREATED)
 
 
@@ -404,7 +461,10 @@ class TicketAttachmentsView(APIView):
             action_summary=f"Uploaded attachment: {file_obj.name}",
             performed_by=request.user,
         )
-
+        log_activity(request, NotifyLogAction.CREATE, ticket, "Support ticket attachment uploaded.", {
+            "ticket_number": ticket.ticket_number,
+            "file_name": file_obj.name,
+        })
         return Response(TicketAttachmentSerializer(attachment).data, status=status.HTTP_201_CREATED)
 
 
@@ -685,6 +745,12 @@ class TeamSubmitTicketView(APIView):
         serializer = TeamSubmitTicketSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         ticket = serializer.save()
+        log_activity(request, NotifyLogAction.CREATE, ticket, "Team support ticket submitted.", {
+            "ticket_number": ticket.ticket_number,
+            "customer_email": ticket.customer_email,
+            "team_id": ticket.team_id,
+            "subject": ticket.subject,
+        })
 
         return Response(
             {
@@ -844,6 +910,46 @@ class AdminSupportResourceViewSet(viewsets.ModelViewSet):
             return SupportResourceAdminCreateUpdateSerializer
         return SupportResourceSerializer
 
+    def _resource_metadata(self, resource):
+        return {
+            "title": resource.title,
+            "category": resource.category,
+            "file_name": resource.file_name,
+            "file_type": resource.file_type,
+            "is_active": resource.is_active,
+        }
+
     def perform_create(self, serializer):
-        serializer.save(uploaded_by=self.request.user)
+        resource = serializer.save(uploaded_by=self.request.user)
+        log_activity(
+            self.request,
+            NotifyLogAction.CREATE,
+            resource,
+            "Support resource created.",
+            self._resource_metadata(resource),
+        )
+
+    def perform_update(self, serializer):
+        resource = serializer.save()
+        metadata = self._resource_metadata(resource)
+        metadata["updated_fields"] = list(self.request.data.keys())
+        log_activity(
+            self.request,
+            NotifyLogAction.UPDATE,
+            resource,
+            "Support resource updated.",
+            metadata,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        resource = self.get_object()
+        metadata = self._resource_metadata(resource)
+        response = super().destroy(request, *args, **kwargs)
+        if response.status_code < 400:
+            log_activity(request, NotifyLogAction.DELETE, resource, "Support resource deleted.", metadata)
+        return response
+
+
+
+
 

@@ -48,6 +48,8 @@ class ActivityLog(BaseModel):
     metadata_json = models.JSONField(default=dict)
     
     def __str__(self):
-        username = self.user.username if self.user else None
-        return f"{self.created_at} - {username} - {self.action} | {self.status}"
+        user_email = self.user.email if self.user else None
+        return f"{self.created_at} - {user_email} - {self.action} | {self.status}"
+
+
 

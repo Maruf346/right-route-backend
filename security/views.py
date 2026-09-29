@@ -324,6 +324,9 @@ class DataProtectionRequestViewSet(viewsets.ModelViewSet):
         serializer = DataRequestNoteCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         _add_admin_note(instance, serializer.validated_data["body"], request.user)
+        _log_action(request, NotifyLogAction.UPDATE, instance, "Data protection note added.", {
+            "request_id": instance.request_id,
+        })
         note = instance.notes.first()
         return Response(
             {"success": True, "message": "Note added.", "data": DataRequestNoteSerializer(note).data},
@@ -1051,6 +1054,11 @@ class TeamDataProtectionSubmitView(APIView):
 
         # Log system note
         _add_system_note(instance, f"Request submitted via Team Dashboard by {user.email}.")
+        _log_action(request, NotifyLogAction.CREATE, instance, "Data protection request submitted from Team Dashboard.", {
+            "request_id": instance.request_id,
+            "request_type": instance.request_type,
+            "team_id": team.id if team else None,
+        })
 
         # Send alert to staff and receipt confirmation to customer
         send_team_request_staff_alert(instance)

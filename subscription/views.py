@@ -11,12 +11,13 @@ from subscription.services.purchase_service import SubscriptionPurchaseService
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework import viewsets
-from core.constants import PlanType, UserStatus, UserSubscriptionStatus, PaymentStatus, PURCHASE_PLATFORM
+from core.constants import NotifyLogAction, PlanType, UserStatus, UserSubscriptionStatus, PaymentStatus, PURCHASE_PLATFORM
 from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError
 from django.utils import timezone
 from django.db.models import Q
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
+from notification.utils import log_activity
 
 
 @extend_schema(tags=["Subscription Plans - Admin"])
@@ -27,6 +28,38 @@ class SubscriptionPlanViewSet(OwnModelViewSet):
     model = SubscriptionPlan
     delete_message = "Subscription Plan Deleted."
     filterset_class = SubscriptionPlanFilterSet
+
+    def create_success_response(self, serializer):
+        response = super().create_success_response(serializer)
+        plan = serializer.instance
+        log_activity(
+            self.request,
+            NotifyLogAction.CREATE,
+            plan,
+            "Subscription plan created.",
+            {"plan_name": plan.name, "plan_type": plan.plan_type, "price": str(plan.price)},
+        )
+        return response
+
+    def update_success_response(self, serializer):
+        response = super().update_success_response(serializer)
+        plan = serializer.instance
+        log_activity(
+            self.request,
+            NotifyLogAction.UPDATE,
+            plan,
+            "Subscription plan updated.",
+            {"plan_name": plan.name, "updated_fields": list(self.request.data.keys())},
+        )
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        metadata = {"plan_name": instance.name, "plan_type": instance.plan_type, "price": str(instance.price)}
+        response = super().destroy(request, *args, **kwargs)
+        if response.status_code < 400:
+            log_activity(request, NotifyLogAction.DELETE, instance, "Subscription plan deleted.", metadata)
+        return response
 
 
 @extend_schema(tags=["Subscriptions - User"])
@@ -229,6 +262,17 @@ class AdminSubscriberBaseViewSet(viewsets.GenericViewSet):
         )
         serializer.is_valid(raise_exception=True)
         subscription = serializer.save()
+        log_activity(
+            request,
+            NotifyLogAction.UPDATE,
+            subscription,
+            "Subscriber updated.",
+            {
+                "subscriber_email": subscription.user.email,
+                "plan_type": self.plan_type,
+                "updated_fields": list(request.data.keys()),
+            },
+        )
         response_serializer = self.get_response_serializer_class()(subscription)
         return Response(
             {
@@ -245,6 +289,13 @@ class AdminSubscriberBaseViewSet(viewsets.GenericViewSet):
         user.is_active = not locked
         user.status = UserStatus.BLOCKED if locked else UserStatus.ACTIVE
         user.save(update_fields=["is_active", "status", "updated_at"])
+        log_activity(
+            self.request,
+            NotifyLogAction.UPDATE,
+            subscription,
+            "Subscriber locked." if locked else "Subscriber unlocked.",
+            {"subscriber_email": user.email, "plan_type": self.plan_type, "locked": locked},
+        )
         response_serializer = self.get_response_serializer_class()(subscription)
         return Response(
             {
@@ -371,6 +422,18 @@ class AdminTeamSubscriberViewSet(AdminSubscriberBaseViewSet):
             user.status = UserStatus.BLOCKED if locked else UserStatus.ACTIVE
             user.save(update_fields=["is_active", "status", "updated_at"])
 
+        log_activity(
+            self.request,
+            NotifyLogAction.UPDATE,
+            subscription,
+            "Team subscriber locked." if locked else "Team subscriber unlocked.",
+            {
+                "subscriber_email": subscription.user.email,
+                "team_id": subscription.team_id,
+                "affected_user_count": len(affected_users),
+                "locked": locked,
+            },
+        )
         response_serializer = self.get_response_serializer_class()(subscription)
         return Response(
             {
@@ -441,6 +504,12 @@ class AdminTeamSubscriberViewSet(AdminSubscriberBaseViewSet):
     def destroy(self, request, *args, **kwargs):
         subscription = self.get_object()
         user = subscription.user
+        metadata = {
+            "subscriber_email": user.email,
+            "subscription_id": subscription.id,
+            "team_id": subscription.team_id,
+        }
+        log_activity(request, NotifyLogAction.DELETE, subscription, "Team subscriber account deleted.", metadata)
         user.delete()
         return Response(
             {
