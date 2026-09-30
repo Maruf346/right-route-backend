@@ -20,16 +20,39 @@ def _build_connection(email_config):
         username=email_config.host_user,
         password=email_config.host_password,
         use_tls=email_config.tls,
+        use_ssl=email_config.ssl,
         fail_silently=False,
     )
 
 
+def _build_settings_connection():
+    """Build an SMTP connection from EMAIL_* settings when EmailConfig is not seeded."""
+    if not getattr(settings, "EMAIL_HOST", None):
+        raise Exception("No active email configuration found.")
+    if not getattr(settings, "EMAIL_HOST_USER", None) or not getattr(settings, "EMAIL_HOST_PASSWORD", None):
+        raise Exception("SMTP email username/password are not configured.")
+
+    return get_connection(
+        backend=getattr(settings, "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"),
+        host=settings.EMAIL_HOST,
+        port=int(getattr(settings, "EMAIL_PORT", 587)),
+        username=settings.EMAIL_HOST_USER,
+        password=settings.EMAIL_HOST_PASSWORD,
+        use_tls=getattr(settings, "EMAIL_USE_TLS", False),
+        use_ssl=getattr(settings, "EMAIL_USE_SSL", False),
+        fail_silently=False,
+    )
+
+
+def _get_email_connection_and_sender():
+    email_config = EmailConfig.objects.filter(is_active=True).first()
+    if email_config:
+        return _build_connection(email_config), f"{email_config.name} <{email_config.email}>"
+    return _build_settings_connection(), getattr(settings, "DEFAULT_FROM_EMAIL", settings.EMAIL_HOST_USER)
+
+
 # def LogInOTPSend(otp_object):
 def EmailOTPSend(otp_object):
-    email_config = EmailConfig.objects.filter(is_active=True).first()
-    if not email_config:
-        raise Exception("No active email configuration found.")
-
     email = otp_object.email
     otp = otp_object.otp_code
 
@@ -43,11 +66,11 @@ def EmailOTPSend(otp_object):
         context,
     )
 
-    connection = _build_connection(email_config)
+    connection, from_email = _get_email_connection_and_sender()
     email_message = EmailMessage(
         subject=subject,
         body=html_message,
-        from_email=f"{email_config.name} <{email_config.email}>",
+        from_email=from_email,
         to=[email],
         connection=connection,
     )
@@ -71,10 +94,6 @@ def EmailOTPSend(otp_object):
 
 
 def EmailInvitationLink(invite, accept_link, non_register_user):
-    email_config = EmailConfig.objects.filter(is_active=True).first()
-    if not email_config:
-        raise Exception("No active email configuration found.")
-
     email = invite.invited_to
 
     subject = f"You've Been Invited to Join {invite.team.name} on RightRoute"
@@ -96,11 +115,11 @@ def EmailInvitationLink(invite, accept_link, non_register_user):
             context,
         )
 
-    connection = _build_connection(email_config)
+    connection, from_email = _get_email_connection_and_sender()
     email_message = EmailMessage(
         subject=subject,
         body=html_message,
-        from_email=f"{email_config.name} <{email_config.email}>",
+        from_email=from_email,
         to=[email],
         connection=connection,
     )
