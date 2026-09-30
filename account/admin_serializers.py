@@ -147,6 +147,8 @@ class AdminLoginTokenDataSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     email = serializers.EmailField()
     user_type = serializers.CharField()
+    is_superadmin = serializers.BooleanField()
+    permissions = serializers.ListField(child=serializers.CharField())
     access_token = serializers.CharField()
     refresh_token = serializers.CharField()
 
@@ -499,5 +501,15 @@ class AdminUserAccessResponseSerializer(serializers.Serializer):
     message = serializers.CharField()
     data = AdminUserSerializer()
 
+class AdminMeDataSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    email = serializers.EmailField()
+    user_type = serializers.CharField()
+    is_superadmin = serializers.BooleanField()
+    permissions = serializers.ListField(child=serializers.CharField())
 
+
+class AdminMeResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    data = AdminMeDataSerializer()
 

@@ -19,7 +19,7 @@ from drf_spectacular.utils import (
 )
 from .admin_serializers import *
 from core.constants import LogStatus, NotifyLogAction, UserStatus, UserType
-from core.permissions import HasAdminDashboardPermission
+from core.permissions import HasAdminDashboardPermission, get_admin_dashboard_permissions
 from notification.models import ActivityLog
 from .utils import OwnAPIView
 
@@ -91,6 +91,36 @@ class AdminResetPasswordView(OwnAPIView):
                 "data": {
                     "email": serializer.validated_data["email"],
                     "next_step": "LOGIN",
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+@extend_schema(
+    tags=["Auth - Admin"],
+    operation_id="admin_me",
+    summary="Get logged-in admin profile and permissions",
+    responses={200: AdminMeResponseSerializer},
+)
+class AdminMeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if user.user_type != UserType.ADMIN or not user.is_staff:
+            return Response(
+                {"success": False, "detail": "Admin access required."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "id": user.id,
+                    "email": user.email,
+                    "user_type": user.user_type,
+                    "is_superadmin": user.is_superuser,
+                    "permissions": get_admin_dashboard_permissions(user),
                 },
             },
             status=status.HTTP_200_OK,
@@ -174,6 +204,8 @@ class AdminLoginView(OwnAPIView):
                     "id": user.id,
                     "email": user.email,
                     "user_type": user.user_type,
+                    "is_superadmin": user.is_superuser,
+                    "permissions": get_admin_dashboard_permissions(user),
                     "access_token": data["access"],
                     "refresh_token": data["refresh"],
                 },
@@ -614,4 +646,5 @@ class AdminUserViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
 
