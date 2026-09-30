@@ -489,11 +489,16 @@ class AdminUserBulkDeleteSerializer(serializers.Serializer):
     )
 
 
+class AdminUserBulkDeleteSkippedSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    reason = serializers.CharField()
+
+
 class AdminUserBulkDeleteResponseSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     message = serializers.CharField()
     deleted_count = serializers.IntegerField()
-    skipped = serializers.ListField(child=serializers.DictField())
+    skipped = AdminUserBulkDeleteSkippedSerializer(many=True)
 
 
 class AdminUserAccessResponseSerializer(serializers.Serializer):

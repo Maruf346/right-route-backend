@@ -81,7 +81,24 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             return None
 
 
+class ActivityLogOptionItemSerializer(serializers.Serializer):
+    value = serializers.CharField()
+    label = serializers.CharField()
+
+
+class ActivityLogEntityTypeOptionSerializer(serializers.Serializer):
+    value = serializers.CharField()
+    label = serializers.CharField()
+    app_label = serializers.CharField()
+    model = serializers.CharField()
+
+
 class ActivityLogOptionsSerializer(serializers.Serializer):
-    actions = serializers.ListField(child=serializers.DictField())
-    statuses = serializers.ListField(child=serializers.DictField())
-    entity_types = serializers.ListField(child=serializers.DictField())
+    actions = ActivityLogOptionItemSerializer(many=True)
+    statuses = ActivityLogOptionItemSerializer(many=True)
+    entity_types = ActivityLogEntityTypeOptionSerializer(many=True)
+
+
+class ActivityLogOptionsResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    data = ActivityLogOptionsSerializer()

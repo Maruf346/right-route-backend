@@ -12,7 +12,7 @@ from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_sche
 from core.constants import LogStatus, NotifyLogAction
 from core.permissions import HasAdminDashboardPermission
 from notification.models import ActivityLog
-from notification.serializers import ActivityLogOptionsSerializer, ActivityLogSerializer
+from notification.serializers import ActivityLogOptionsResponseSerializer, ActivityLogSerializer
 
 
 AUDIT_LOG_PERMISSION = "security_logging_compliance.audit_logs"
@@ -171,7 +171,7 @@ class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         operation_id="admin_audit_log_options",
         summary="Get audit log filter options",
         description="Returns available action/status choices and logged entity types for audit-log filters.",
-        responses={200: OpenApiResponse(response=ActivityLogOptionsSerializer)},
+        responses={200: OpenApiResponse(response=ActivityLogOptionsResponseSerializer)},
     )
     @action(detail=False, methods=["get"], url_path="options")
     def filter_options(self, request):

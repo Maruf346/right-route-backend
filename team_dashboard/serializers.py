@@ -148,12 +148,20 @@ class TeamLoginOTPResponseSerializer(serializers.Serializer):
     next_step = serializers.CharField(default="OTP_VERIFY")
 
 
+class TeamLoginUserSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    email = serializers.EmailField()
+    full_name = serializers.CharField()
+    role = serializers.CharField()
+    is_super_admin = serializers.BooleanField()
+
+
 class TeamLoginSuccessResponseSerializer(serializers.Serializer):
     success = serializers.BooleanField(default=True)
     message = serializers.CharField()
     access_token = serializers.CharField()
     refresh_token = serializers.CharField()
-    user = serializers.DictField()
+    user = TeamLoginUserSerializer()
     team = TeamInfoSerializer()
     permissions = serializers.ListField(child=serializers.CharField())
 
@@ -398,4 +406,54 @@ class TeamPlanDetailSerializer(serializers.Serializer):
     total_registered_users = serializers.IntegerField()
     slots_remaining = serializers.IntegerField()
     is_active = serializers.BooleanField()
+
+class TeamUsersPaginationSerializer(serializers.Serializer):
+    current_page = serializers.IntegerField()
+    total_pages = serializers.IntegerField()
+    total_count = serializers.IntegerField()
+    has_next = serializers.BooleanField()
+    has_previous = serializers.BooleanField()
+
+
+class TeamUsersListResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    plan_stats = TeamUsersStatsSerializer()
+    pagination = TeamUsersPaginationSerializer()
+    results = TeamMemberItemSerializer(many=True)
+
+
+class TeamUsersProcessResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    added_count = serializers.IntegerField()
+    updated_count = serializers.IntegerField()
+
+
+class TeamUsersImportResponseSerializer(TeamUsersProcessResponseSerializer):
+    errors = serializers.ListField(child=serializers.CharField())
+
+
+class TeamAdminGeneratePasswordResponseSerializer(serializers.Serializer):
+    password = serializers.CharField()
+
+
+class TeamUsersImportCSVRequestSerializer(serializers.Serializer):
+    file = serializers.FileField()
+
+
+class PermissionTreeChildSerializer(serializers.Serializer):
+    key = serializers.CharField()
+    label = serializers.CharField()
+
+
+class PermissionTreeNodeSerializer(serializers.Serializer):
+    key = serializers.CharField()
+    label = serializers.CharField()
+    children = PermissionTreeChildSerializer(many=True, required=False)
+
+
+class TeamPermissionTreeResponseSerializer(serializers.Serializer):
+    permission_tree = PermissionTreeNodeSerializer(many=True)
+    all_permissions = serializers.ListField(child=serializers.CharField())
+
 

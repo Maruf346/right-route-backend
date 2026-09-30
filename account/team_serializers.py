@@ -49,8 +49,13 @@ class TeamMemberCreateSerializer(serializers.Serializer):
         attrs["user"] = user
         return attrs
 
+class TeamMemberInviteInputSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    username = serializers.CharField(required=False, allow_blank=True)
+
+
 class MultpleTeamMemberCreateSerializer(serializers.Serializer):
-    invite_user = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+    invite_user = TeamMemberInviteInputSerializer(many=True, allow_empty=False)
 
     def validate(self, attrs):
         request = self.context["request"]
@@ -96,3 +101,54 @@ class TeamMemberUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = TeamMember
         fields = ["status"]
+
+
+class TeamDetailResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    data = TeamDetailSerializer()
+
+
+class TeamMemberListResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    count = serializers.IntegerField()
+    data = TeamMemberSerializer(many=True)
+
+
+class TeamMemberDetailResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    data = TeamMemberSerializer()
+
+
+class TeamInviteDataSerializer(serializers.Serializer):
+    invite_id = serializers.CharField()
+    accept_link = serializers.URLField()
+
+
+class TeamInviteResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    data = TeamInviteDataSerializer()
+
+
+class TeamBulkInviteItemSerializer(serializers.Serializer):
+    invite_id = serializers.CharField()
+    email = serializers.EmailField()
+    non_register_user = serializers.BooleanField()
+    accept_link = serializers.URLField()
+
+
+class TeamBulkInviteResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    data = TeamBulkInviteItemSerializer(many=True)
+
+
+class TeamMemberUpdateResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    data = TeamMemberSerializer()
+
+
+class TeamSuccessMessageResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()

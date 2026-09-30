@@ -2,8 +2,9 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.tokens import RefreshToken
-from drf_spectacular.utils import extend_schema, OpenApiResponse
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiTypes
 from django.db.models import Q
 
 from team_dashboard.permissions import (
@@ -49,6 +50,12 @@ from team_dashboard.serializers import (
     RouteHistoryBulkDeleteSerializer,
     # Manage — Plan
     TeamPlanDetailSerializer,
+    TeamUsersListResponseSerializer,
+    TeamUsersProcessResponseSerializer,
+    TeamUsersImportResponseSerializer,
+    TeamUsersImportCSVRequestSerializer,
+    TeamAdminGeneratePasswordResponseSerializer,
+    TeamPermissionTreeResponseSerializer,
 )
 from team_dashboard.constants import TeamDashboardRole, TEAM_DASHBOARD_PERMISSIONS
 
@@ -421,6 +428,7 @@ class TeamAdminUsersListView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
     required_team_permission = "manage.admin_users"
 
+    @extend_schema(responses={200: TeamAdminUserListSerializer(many=True)})
     def get(self, request):
         team = get_team_for_user(request.user)
         if not team:
@@ -463,6 +471,7 @@ class TeamAdminUsersListView(APIView):
         serializer = TeamAdminUserListSerializer(profiles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @extend_schema(request=TeamAdminUserCreateSerializer, responses={201: TeamAdminUserDetailSerializer})
     def post(self, request):
         # Adding admin users requires manage.admin_users.add or Super Admin
         from team_dashboard.permissions import is_team_super_admin, get_user_team_permissions
@@ -524,6 +533,7 @@ class TeamAdminUsersListView(APIView):
     description="Manage details, role, permissions, and status of a specific admin user.",
 )
 class TeamAdminUserDetailView(APIView):
+    serializer_class = TeamAdminUserDetailSerializer
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
     required_team_permission = "manage.admin_users"
 
@@ -532,6 +542,7 @@ class TeamAdminUserDetailView(APIView):
         from team_dashboard.models import TeamAdminProfile
         return TeamAdminProfile.objects.filter(user_id=user_id, team=team).select_related("user", "team").first()
 
+    @extend_schema(responses={200: TeamAdminUserDetailSerializer})
     def get(self, request, user_id):
         profile = self.get_profile(request, user_id)
         if not profile:
@@ -540,6 +551,7 @@ class TeamAdminUserDetailView(APIView):
         from team_dashboard.serializers import TeamAdminUserDetailSerializer
         return Response(TeamAdminUserDetailSerializer(profile).data, status=status.HTTP_200_OK)
 
+    @extend_schema(request=TeamAdminUserUpdateSerializer, responses={200: TeamAdminUserDetailSerializer})
     def patch(self, request, user_id):
         profile = self.get_profile(request, user_id)
         if not profile:
@@ -586,6 +598,7 @@ class TeamAdminUserDetailView(APIView):
 
         return Response(TeamAdminUserDetailSerializer(profile).data, status=status.HTTP_200_OK)
 
+    @extend_schema(responses={200: OpenApiResponse(description="Admin user deleted successfully.")})
     def delete(self, request, user_id):
         profile = self.get_profile(request, user_id)
         if not profile:
@@ -709,6 +722,7 @@ class TeamAdminUserBulkActionView(APIView):
     tags=["Team Dashboard - Manage Admin Users"],
     summary="Generate Secure Random Password",
     description="Returns a cryptographically secure random password string for new admin users.",
+    responses={200: TeamAdminGeneratePasswordResponseSerializer},
 )
 class TeamAdminGeneratePasswordView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser]
@@ -725,13 +739,23 @@ class TeamAdminGeneratePasswordView(APIView):
 
 @extend_schema(
     tags=["Team Dashboard - Manage Team Users"],
-    summary="List Team Members & Plan Quota",
-    description="Returns the list of drivers/members for this team along with plan slot statistics.",
+    summary="List or batch add Team Members",
+    description="GET lists team drivers/members with plan slot statistics. POST batch-adds/updates users from the editable list.",
 )
 class TeamUsersListView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
     required_team_permission = "manage.team_users"
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("search", OpenApiTypes.STR, description="Search by name or email."),
+            OpenApiParameter("q", OpenApiTypes.STR, description="Alias for search."),
+            OpenApiParameter("enrolled", OpenApiTypes.STR, enum=["yes", "no"], description="Filter enrolled status."),
+            OpenApiParameter("page", OpenApiTypes.INT, description="Page number."),
+            OpenApiParameter("page_size", OpenApiTypes.INT, description="Page size."),
+        ],
+        responses={200: TeamUsersListResponseSerializer},
+    )
     def get(self, request):
         team = get_team_for_user(request.user)
         if not team:
@@ -798,6 +822,7 @@ class TeamUsersListView(APIView):
             status=status.HTTP_200_OK,
         )
 
+    @extend_schema(request=TeamMemberBatchAddSerializer, responses={200: TeamUsersProcessResponseSerializer})
     def post(self, request):
         """Batch Add/Edit users from list"""
         team = get_team_for_user(request.user)
@@ -860,10 +885,13 @@ class TeamUsersListView(APIView):
 @extend_schema(
     tags=["Team Dashboard - Manage Team Users"],
     summary="Import Team Members from CSV File",
-    description="Upload a CSV file containing Name and Email columns to bulk add drivers to the team.",
+    description="Upload multipart/form-data with file=<csv>. CSV should contain Name and Email columns.",
+    request=TeamUsersImportCSVRequestSerializer,
+    responses={200: TeamUsersImportResponseSerializer},
 )
 class TeamUsersImportCSVView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    parser_classes = [MultiPartParser, FormParser]
     required_team_permission = "manage.team_users"
 
     def post(self, request):
@@ -939,7 +967,8 @@ class TeamUsersImportCSVView(APIView):
 @extend_schema(
     tags=["Team Dashboard - Manage Team Users"],
     summary="Download Team Users as CSV",
-    description="Generates and downloads a CSV export of all team members.",
+    description="Returns text/csv attachment with Content-Disposition filename=team_users.csv.",
+    responses={200: OpenApiResponse(response=OpenApiTypes.BINARY, description="CSV file download (text/csv).")},
 )
 class TeamUsersDownloadCSVView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
@@ -1003,6 +1032,8 @@ class TeamUsersBulkRemoveView(APIView):
     tags=["Team Dashboard - Manage Team Users"],
     summary="Update Team Member Details",
     description="Edits a team member's display name or email address.",
+    request=TeamMemberUpdateSerializer,
+    responses={200: TeamMemberItemSerializer},
 )
 class TeamUserDetailView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
@@ -1202,7 +1233,8 @@ class TeamRouteHistoryBulkDeleteView(APIView):
 @extend_schema(
     tags=["Team Dashboard - Route History"],
     summary="Download Route History as CSV",
-    description="Generates a downloadable CSV of route history records.",
+    description="Returns text/csv attachment with Content-Disposition filename=team_route_history.csv.",
+    responses={200: OpenApiResponse(response=OpenApiTypes.BINARY, description="CSV file download (text/csv).")},
 )
 class TeamRouteHistoryDownloadCSVView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
@@ -1319,6 +1351,7 @@ class TeamPlanView(APIView):
     tags=["Team Dashboard - Manage"],
     summary="Get Permissions Tree for UI Checkboxes",
     description="Returns the full hierarchical permissions tree for rendering checkboxes on Add/Edit Admin User form.",
+    responses={200: TeamPermissionTreeResponseSerializer},
 )
 class TeamPermissionTreeView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser]
@@ -1332,4 +1365,5 @@ class TeamPermissionTreeView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
 

@@ -1,4 +1,4 @@
-from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiTypes
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from drf_spectacular.openapi import AutoSchema
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -18,7 +18,14 @@ from .team_serializers import (
     TeamMemberCreateSerializer,
     MultpleTeamMemberCreateSerializer,
     TeamMemberBulkDeleteSerializer,
-    TeamMemberUpdateSerializer
+    TeamMemberUpdateSerializer,
+    TeamDetailResponseSerializer,
+    TeamMemberListResponseSerializer,
+    TeamMemberDetailResponseSerializer,
+    TeamInviteResponseSerializer,
+    TeamBulkInviteResponseSerializer,
+    TeamMemberUpdateResponseSerializer,
+    TeamSuccessMessageResponseSerializer,
 )
 from django.conf import settings
 from django.db import transaction
@@ -30,65 +37,47 @@ from account.emailsend import EmailInvitationLink
     list=extend_schema(
         tags=["Team"],
         description="Get list of team members.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamDetailResponseSerializer}
     ),
     add_member=extend_schema(
         tags=["Team"],
         description="Add a new team member.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamInviteResponseSerializer}
     ),
     multiple_add_member=extend_schema(
         tags=["Team"],
         description="Add multiple team members.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamBulkInviteResponseSerializer}
     ),
     detail_member=extend_schema(
         tags=["Team"],
         description="Get team member details.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamMemberDetailResponseSerializer}
     ),
     update_member=extend_schema(
         tags=["Team"],
         description="Update team member details.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamMemberUpdateResponseSerializer}
     ),
     bulk_delete_member=extend_schema(
         tags=["Team"],
         description="Delete team members.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamSuccessMessageResponseSerializer}
     ),
     remove_member=extend_schema(
         tags=["Team"],
         description="Remove team member.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamSuccessMessageResponseSerializer}
     ),
     send_invite=extend_schema(
         tags=["Team"],
         description="Send invitation to a user.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamSuccessMessageResponseSerializer}
     ),
     accept_invite=extend_schema(
         tags=["Team"],
         description="Accept team invite.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamSuccessMessageResponseSerializer}
     )
     
 )
@@ -112,9 +101,7 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
     @extend_schema(
         tags=["Team"],
         description="Get list of team members.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamMemberListResponseSerializer}
     )
     @action(detail=False, methods=["get"], url_path="members")
     def members(self, request):
@@ -159,9 +146,7 @@ class TeamViewSet(ListModelMixin, GenericViewSet):
     @extend_schema(
         tags=["Team"],
         description="Add a new team member.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamInviteResponseSerializer}
     )
     @members.mapping.post
     def add_member(self, request):
@@ -301,9 +286,7 @@ class AcceptTeamInviteView(APIView):
     @extend_schema(
         tags=["Team"],
         description="Accept team invite.",
-        responses={
-            status.HTTP_200_OK: OpenApiTypes.OBJECT,
-        }
+        responses={status.HTTP_200_OK: TeamSuccessMessageResponseSerializer}
     )
     def get(self, request, uuid):
         try:
