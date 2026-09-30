@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiTypes
 from django.db.models import Q
@@ -48,6 +48,14 @@ from team_dashboard.serializers import (
     RouteHistoryItemSerializer,
     RouteWaypointItemSerializer,
     RouteHistoryBulkDeleteSerializer,
+    TeamRouteCreateRequestSerializer,
+    TeamRouteUpdateRequestSerializer,
+    TeamRoutePermitWriteSerializer,
+    TeamRouteWaypointWriteSerializer,
+    TeamRouteMapUpdateRequestSerializer,
+    TeamRouteMutationResponseSerializer,
+    TeamRoutePermitMutationResponseSerializer,
+    TeamRouteWaypointMutationResponseSerializer,
     # Manage — Plan
     TeamPlanDetailSerializer,
     TeamUsersListResponseSerializer,
@@ -1077,24 +1085,27 @@ class TeamUserDetailView(APIView):
     tags=["Team Dashboard - Route History"],
     summary="List Route History with Sequence Numbers",
     description=(
-        "Lists routes for this team. Admins with `manage.route_history.team` can view all drivers' routes or filter by `user_id`. "
-        "Users with `manage.route_history.my` see their own routes."
+        "Lists routes for this team. Team owners/admins/managers with `manage.route_history.team` can view all drivers' routes or filter by `user_id` or `user_email`."
     ),
+    parameters=[
+        OpenApiParameter("user_id", OpenApiTypes.INT, description="Filter by team driver user ID."),
+        OpenApiParameter("user_email", OpenApiTypes.EMAIL, description="Filter by team driver email."),
+        OpenApiParameter("search", OpenApiTypes.STR, description="Search route name, description, or driver email."),
+        OpenApiParameter("page", OpenApiTypes.INT, description="Page number."),
+        OpenApiParameter("page_size", OpenApiTypes.INT, description="Page size."),
+    ],
     responses={200: RouteHistoryItemSerializer(many=True)},
 )
 class TeamRouteHistoryListView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
-    required_team_permission = ["manage.route_history.team", "manage.route_history.my"]
+    required_team_permission = "manage.route_history.team"
 
     def get(self, request):
         team = get_team_for_user(request.user)
-        from team_dashboard.permissions import is_team_super_admin, get_user_team_permissions
         from route.models import Route
         from django.db.models import Q
         from django.core.paginator import Paginator
 
-        user_perms = get_user_team_permissions(request.user)
-        can_view_all = is_team_super_admin(request.user) or ("manage.route_history.team" in user_perms)
 
         # Base query for routes: belongs to team or created by team members
         if team:
@@ -1103,14 +1114,15 @@ class TeamRouteHistoryListView(APIView):
                 Q(team=team) | Q(created_by_id__in=team_driver_ids)
             ).select_related("created_by").order_by("-created_at")
         else:
-            routes_qs = Route.objects.filter(created_by=request.user).select_related("created_by").order_by("-created_at")
+            routes_qs = Route.objects.none()
 
         driver_user_id = request.query_params.get("user_id")
-        if not can_view_all:
-            # Force to only current user's routes
-            routes_qs = routes_qs.filter(created_by=request.user)
-        elif driver_user_id:
+        if driver_user_id:
             routes_qs = routes_qs.filter(created_by_id=driver_user_id)
+
+        driver_email = request.query_params.get("user_email")
+        if driver_email:
+            routes_qs = routes_qs.filter(created_by__email__iexact=driver_email.strip())
 
         # Search filter
         search = request.query_params.get("search") or request.query_params.get("q")
@@ -1161,13 +1173,12 @@ class TeamRouteHistoryListView(APIView):
 )
 class TeamRouteWaypointsView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
-    required_team_permission = ["manage.route_history.team", "manage.route_history.my"]
+    required_team_permission = "manage.route_history.team"
 
     def get(self, request, route_id):
-        team = get_team_for_user(request.user)
-        from route.models import Route, PermitWaypoint
+        from route.models import PermitWaypoint
 
-        route = Route.objects.filter(id=route_id).first()
+        route = _get_team_route_or_404(request, route_id)
         if not route:
             return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1197,11 +1208,10 @@ class TeamRouteWaypointsView(APIView):
 )
 class TeamRouteHistoryBulkDeleteView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
-    required_team_permission = ["manage.route_history.team", "manage.route_history.my"]
+    required_team_permission = "manage.route_history.team"
 
     def post(self, request):
         team = get_team_for_user(request.user)
-        from team_dashboard.permissions import is_team_super_admin, get_user_team_permissions
         from route.models import Route
         from team_dashboard.serializers import RouteHistoryBulkDeleteSerializer
 
@@ -1209,14 +1219,12 @@ class TeamRouteHistoryBulkDeleteView(APIView):
         serializer.is_valid(raise_exception=True)
         route_ids = serializer.validated_data["route_ids"]
 
-        can_view_all = is_team_super_admin(request.user) or ("manage.route_history.team" in get_user_team_permissions(request.user))
-
         routes = Route.objects.filter(id__in=route_ids)
-        if not can_view_all:
-            routes = routes.filter(created_by=request.user)
-        elif team:
+        if team:
             team_driver_ids = list(team.members.values_list("user_id", flat=True)) + [team.owner_id]
             routes = routes.filter(Q(team=team) | Q(created_by_id__in=team_driver_ids))
+        else:
+            routes = Route.objects.none()
 
         deleted_count, _ = routes.delete()
 
@@ -1238,17 +1246,15 @@ class TeamRouteHistoryBulkDeleteView(APIView):
 )
 class TeamRouteHistoryDownloadCSVView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
-    required_team_permission = ["manage.route_history.team", "manage.route_history.my"]
+    required_team_permission = "manage.route_history.team"
 
     def get(self, request):
         from django.http import HttpResponse
         import csv
         team = get_team_for_user(request.user)
-        from team_dashboard.permissions import is_team_super_admin, get_user_team_permissions
         from route.models import Route
         from django.db.models import Q
 
-        can_view_all = is_team_super_admin(request.user) or ("manage.route_history.team" in get_user_team_permissions(request.user))
 
         if team:
             team_driver_ids = list(team.members.values_list("user_id", flat=True)) + [team.owner_id]
@@ -1256,10 +1262,7 @@ class TeamRouteHistoryDownloadCSVView(APIView):
                 Q(team=team) | Q(created_by_id__in=team_driver_ids)
             ).select_related("created_by").order_by("-created_at")
         else:
-            routes = Route.objects.filter(created_by=request.user).select_related("created_by").order_by("-created_at")
-
-        if not can_view_all:
-            routes = routes.filter(created_by=request.user)
+            routes = Route.objects.none()
 
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="team_route_history.csv"'
@@ -1367,3 +1370,505 @@ class TeamPermissionTreeView(APIView):
         )
 
 
+
+
+# =====================================================================
+# TEAM DASHBOARD ROUTE MANAGEMENT HELPERS / VIEWS
+# =====================================================================
+
+def _team_can_manage_all_routes(user):
+    return is_team_super_admin(user) or ("manage.route_history.team" in get_user_team_permissions(user))
+
+
+def _team_driver_user_ids(team):
+    if not team:
+        return []
+    ids = list(team.members.values_list("user_id", flat=True))
+    if team.owner_id:
+        ids.append(team.owner_id)
+    return list(set(ids))
+
+
+def _team_route_queryset(request):
+    from route.models import Route
+
+    team = get_team_for_user(request.user)
+    if not team:
+        return Route.objects.none()
+
+    queryset = Route.objects.filter(
+        Q(team=team) | Q(created_by_id__in=_team_driver_user_ids(team))
+    ).select_related("created_by", "team").prefetch_related("permits", "permits__waypoints")
+
+    return queryset
+
+
+def _get_team_route_or_404(request, route_id):
+    return _team_route_queryset(request).filter(id=route_id).first()
+
+
+def _get_target_team_driver_or_error(request, user_id):
+    from account.models import TeamMember, User
+
+    team = get_team_for_user(request.user)
+    if not team:
+        return None, Response({"detail": "Active team not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None, Response({"detail": "Invalid user_id."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+    is_owner = team.owner_id == user_id
+    is_member = TeamMember.objects.filter(team=team, user_id=user_id).exists()
+    if not (is_owner or is_member):
+        return None, Response({"detail": "Driver does not belong to this team."}, status=status.HTTP_404_NOT_FOUND)
+
+    user = User.objects.filter(id=user_id, is_active=True).first()
+    if not user:
+        return None, Response({"detail": "Driver user not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+
+    return user, None
+
+
+def _sync_route_waypoint_count(route):
+    total = route.waypoints.count()
+    if total != route.total_waypoints:
+        route.total_waypoints = total
+        route.save(update_fields=["total_waypoints", "updated_at"])
+    return total
+
+
+def _build_extracted_waypoints(permit, route, permit_file=None, permit_text=None):
+    if not (permit_file or permit_text):
+        return []
+
+    from route.models import PermitWaypoint
+    from route.service import extract_route_data, get_intersection_lat_lng
+
+    route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
+    intersections = (route_data or {}).get("intersection", [])
+    if intersections and len(intersections) > 1:
+        intersections = intersections[:-1]
+
+    waypoints = get_intersection_lat_lng(intersections) if intersections else []
+    return [
+        PermitWaypoint(
+            permit=permit,
+            route=route,
+            index=index,
+            name=wp.get("name") or f"Waypoint {index}",
+            latitude=wp.get("lat"),
+            longitude=wp.get("lng"),
+        )
+        for index, wp in enumerate(waypoints, start=1)
+        if wp.get("lat") is not None and wp.get("lng") is not None
+    ]
+
+
+def _replace_permit_waypoints(permit, route, waypoints_data):
+    from route.models import PermitWaypoint
+
+    permit.waypoints.all().delete()
+    waypoint_objects = []
+    for position, item in enumerate(waypoints_data, start=1):
+        waypoint_objects.append(
+            PermitWaypoint(
+                permit=permit,
+                route=route,
+                index=item.get("index") or position,
+                name=item["name"],
+                waypoint_type=item.get("waypoint_type") or "CHECKPOINT",
+                latitude=item["latitude"],
+                longitude=item["longitude"],
+                description=item.get("description"),
+                icon=item.get("icon") or "pin",
+                eta_minutes=item.get("eta_minutes") or 0,
+            )
+        )
+    PermitWaypoint.objects.bulk_create(waypoint_objects)
+    _sync_route_waypoint_count(route)
+
+
+def _create_or_update_permit(route, validated_data, permit=None, replace_waypoints=True):
+    from django.db.models import Max
+    from route.models import RoutePermit, PermitWaypoint
+
+    waypoints_data = validated_data.pop("waypoints", None)
+    permit_file = validated_data.get("permit_file")
+    permit_text = validated_data.get("permit_text")
+
+    if permit is None:
+        current_max = RoutePermit.objects.filter(route=route).aggregate(Max("index"))["index__max"]
+        validated_data["index"] = validated_data.get("index") or ((current_max or 0) + 1)
+        permit = RoutePermit.objects.create(route=route, **validated_data)
+    else:
+        for field, value in validated_data.items():
+            setattr(permit, field, value)
+        permit.save()
+
+    if waypoints_data is not None:
+        if replace_waypoints:
+            _replace_permit_waypoints(permit, route, waypoints_data)
+    elif permit_file or permit_text:
+        permit.waypoints.all().delete()
+        PermitWaypoint.objects.bulk_create(
+            _build_extracted_waypoints(permit, route, permit_file=permit_file, permit_text=permit_text)
+        )
+        _sync_route_waypoint_count(route)
+
+    return permit
+
+
+@extend_schema(
+    tags=["Team Dashboard - Route Management"],
+    summary="Create route for a team driver",
+    description="Creates a route on behalf of a team driver. Use the user_id returned by the team users list.",
+    request=TeamRouteCreateRequestSerializer,
+    responses={201: TeamRouteMutationResponseSerializer},
+)
+class TeamDriverRouteCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    required_team_permission = "manage.route_history.team"
+
+    def post(self, request, user_id):
+        from django.db import transaction
+        from route.models import Route
+        from route.serializers import AdminRouteHistoryDetailSerializer
+
+        target_user, error_response = _get_target_team_driver_or_error(request, user_id)
+        if error_response is not None:
+            return error_response
+
+        serializer = TeamRouteCreateRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        team = get_team_for_user(request.user)
+
+        with transaction.atomic():
+            name = (data.get("name") or "").strip()
+            if not name:
+                name = f"{data.get('start_location', '')} to {data.get('end_location', '')}".strip(" to") or "Untitled Route"
+
+            route = Route.objects.create(
+                created_by=target_user,
+                team=team,
+                name=name,
+                description=data.get("description"),
+            )
+            permit_data = {
+                "index": 1,
+                "name": "Permit 1",
+                "start_location": data["start_location"],
+                "start_latitude": data["start_latitude"],
+                "start_longitude": data["start_longitude"],
+                "end_location": data["end_location"],
+                "end_latitude": data["end_latitude"],
+                "end_longitude": data["end_longitude"],
+                "permit_file": data.get("permit_file"),
+                "permit_text": data.get("permit_text"),
+            }
+            if "waypoints" in data:
+                permit_data["waypoints"] = data["waypoints"]
+            _create_or_update_permit(route, permit_data)
+            _sync_route_waypoint_count(route)
+
+        detail = AdminRouteHistoryDetailSerializer(route, context={"request": request}).data
+        return Response(
+            {
+                "success": True,
+                "message": "Route created successfully.",
+                "route_id": route.id,
+                "data": detail,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@extend_schema(
+    tags=["Team Dashboard - Route Management"],
+    summary="Retrieve or update a team route",
+    request=TeamRouteUpdateRequestSerializer,
+    responses={200: OpenApiResponse(description="Route detail or updated route response.")},
+)
+class TeamRouteDetailManageView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "manage.route_history.team"
+
+    def get(self, request, route_id):
+        from route.serializers import AdminRouteHistoryDetailSerializer
+
+        route = _get_team_route_or_404(request, route_id)
+        if not route:
+            return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = AdminRouteHistoryDetailSerializer(route, context={"request": request})
+        return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
+
+    def patch(self, request, route_id):
+        from route.serializers import AdminRouteHistoryDetailSerializer
+
+        route = _get_team_route_or_404(request, route_id)
+        if not route:
+            return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = TeamRouteUpdateRequestSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(route, field, value)
+        route.save()
+
+        response_serializer = AdminRouteHistoryDetailSerializer(route, context={"request": request})
+        return Response(
+            {
+                "success": True,
+                "message": "Route updated successfully.",
+                "route_id": route.id,
+                "data": response_serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(
+    tags=["Team Dashboard - Route Management"],
+    summary="Update route map payload",
+    description="Updates route metadata and nested permits/waypoints in one save request from the route edit screen.",
+    request=TeamRouteMapUpdateRequestSerializer,
+    responses={200: TeamRouteMutationResponseSerializer},
+)
+class TeamRouteMapUpdateView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    required_team_permission = "manage.route_history.team"
+
+    def patch(self, request, route_id):
+        from django.db import transaction
+        from route.models import RoutePermit
+        from route.serializers import AdminRouteHistoryDetailSerializer
+
+        route = _get_team_route_or_404(request, route_id)
+        if not route:
+            return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = TeamRouteMapUpdateRequestSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        permits_data = data.pop("permits", None)
+        delete_missing_permits = data.pop("delete_missing_permits", False)
+        replace_waypoints = data.pop("replace_waypoints", True)
+
+        with transaction.atomic():
+            for field, value in data.items():
+                setattr(route, field, value)
+            route.save()
+
+            seen_permit_ids = []
+            if permits_data is not None:
+                for permit_payload in permits_data:
+                    permit_payload = dict(permit_payload)
+                    permit_id = permit_payload.pop("id", None)
+                    permit = None
+                    if permit_id:
+                        permit = RoutePermit.objects.filter(id=permit_id, route=route).first()
+                        if not permit:
+                            return Response({"detail": f"Permit {permit_id} not found for this route."}, status=status.HTTP_404_NOT_FOUND)
+                    permit = _create_or_update_permit(route, permit_payload, permit=permit, replace_waypoints=replace_waypoints)
+                    seen_permit_ids.append(permit.id)
+
+                if delete_missing_permits:
+                    RoutePermit.objects.filter(route=route).exclude(id__in=seen_permit_ids).delete()
+
+            _sync_route_waypoint_count(route)
+
+        response_serializer = AdminRouteHistoryDetailSerializer(route, context={"request": request})
+        return Response(
+            {
+                "success": True,
+                "message": "Route map updated successfully.",
+                "route_id": route.id,
+                "data": response_serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(
+    tags=["Team Dashboard - Route Management"],
+    summary="Add permit to a team route",
+    request=TeamRoutePermitWriteSerializer,
+    responses={201: TeamRoutePermitMutationResponseSerializer},
+)
+class TeamRoutePermitListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    required_team_permission = "manage.route_history.team"
+
+    def post(self, request, route_id):
+        from django.db import transaction
+        from route.serializers import RoutePermitSerializer
+
+        route = _get_team_route_or_404(request, route_id)
+        if not route:
+            return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = TeamRoutePermitWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            permit = _create_or_update_permit(route, dict(serializer.validated_data))
+        return Response(
+            {
+                "success": True,
+                "message": "Permit added successfully.",
+                "permit_id": permit.id,
+                "data": RoutePermitSerializer(permit, context={"request": request}).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@extend_schema(
+    tags=["Team Dashboard - Route Management"],
+    summary="Update or delete a permit on a team route",
+    request=TeamRoutePermitWriteSerializer,
+    responses={200: TeamRoutePermitMutationResponseSerializer},
+)
+class TeamRoutePermitDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    required_team_permission = "manage.route_history.team"
+
+    def patch(self, request, route_id, permit_id):
+        from django.db import transaction
+        from route.models import RoutePermit
+        from route.serializers import RoutePermitSerializer
+
+        route = _get_team_route_or_404(request, route_id)
+        if not route:
+            return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+        permit = RoutePermit.objects.filter(id=permit_id, route=route).first()
+        if not permit:
+            return Response({"detail": "Permit not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = TeamRoutePermitWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            permit = _create_or_update_permit(route, dict(serializer.validated_data), permit=permit)
+        return Response(
+            {
+                "success": True,
+                "message": "Permit updated successfully.",
+                "permit_id": permit.id,
+                "data": RoutePermitSerializer(permit, context={"request": request}).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request, route_id, permit_id):
+        from route.models import RoutePermit
+
+        route = _get_team_route_or_404(request, route_id)
+        if not route:
+            return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+        permit = RoutePermit.objects.filter(id=permit_id, route=route).first()
+        if not permit:
+            return Response({"detail": "Permit not found."}, status=status.HTTP_404_NOT_FOUND)
+        permit.delete()
+        _sync_route_waypoint_count(route)
+        return Response({"success": True, "message": "Permit deleted successfully."}, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=["Team Dashboard - Route Management"],
+    summary="Add waypoint to a permit on a team route",
+    request=TeamRouteWaypointWriteSerializer,
+    responses={201: TeamRouteWaypointMutationResponseSerializer},
+)
+class TeamRouteWaypointListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "manage.route_history.team"
+
+    def post(self, request, route_id, permit_id):
+        from route.models import RoutePermit, PermitWaypoint
+        from route.serializers import WaypointSerializer
+
+        route = _get_team_route_or_404(request, route_id)
+        if not route:
+            return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+        permit = RoutePermit.objects.filter(id=permit_id, route=route).first()
+        if not permit:
+            return Response({"detail": "Permit not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = TeamRouteWaypointWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        next_index = data.pop("index", None) or ((permit.waypoints.order_by("index").last().index + 1) if permit.waypoints.exists() else 1)
+        waypoint = PermitWaypoint.objects.create(permit=permit, route=route, index=next_index, **data)
+        _sync_route_waypoint_count(route)
+        return Response(
+            {
+                "success": True,
+                "message": "Waypoint added successfully.",
+                "waypoint_id": waypoint.id,
+                "data": WaypointSerializer(waypoint).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@extend_schema(
+    tags=["Team Dashboard - Route Management"],
+    summary="Update or delete a waypoint on a team route",
+    request=TeamRouteWaypointWriteSerializer,
+    responses={200: TeamRouteWaypointMutationResponseSerializer},
+)
+class TeamRouteWaypointDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "manage.route_history.team"
+
+    def patch(self, request, route_id, permit_id, waypoint_id):
+        from route.models import RoutePermit, PermitWaypoint
+        from route.serializers import WaypointSerializer
+
+        route = _get_team_route_or_404(request, route_id)
+        if not route:
+            return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+        permit = RoutePermit.objects.filter(id=permit_id, route=route).first()
+        if not permit:
+            return Response({"detail": "Permit not found."}, status=status.HTTP_404_NOT_FOUND)
+        waypoint = PermitWaypoint.objects.filter(id=waypoint_id, permit=permit).first()
+        if not waypoint:
+            return Response({"detail": "Waypoint not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = TeamRouteWaypointWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(waypoint, field, value)
+        waypoint.route = route
+        waypoint.save()
+        return Response(
+            {
+                "success": True,
+                "message": "Waypoint updated successfully.",
+                "waypoint_id": waypoint.id,
+                "data": WaypointSerializer(waypoint).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request, route_id, permit_id, waypoint_id):
+        from route.models import RoutePermit, PermitWaypoint
+
+        route = _get_team_route_or_404(request, route_id)
+        if not route:
+            return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+        permit = RoutePermit.objects.filter(id=permit_id, route=route).first()
+        if not permit:
+            return Response({"detail": "Permit not found."}, status=status.HTTP_404_NOT_FOUND)
+        waypoint = PermitWaypoint.objects.filter(id=waypoint_id, permit=permit).first()
+        if not waypoint:
+            return Response({"detail": "Waypoint not found."}, status=status.HTTP_404_NOT_FOUND)
+        waypoint.delete()
+        _sync_route_waypoint_count(route)
+        return Response({"success": True, "message": "Waypoint deleted successfully."}, status=status.HTTP_200_OK)

@@ -28,6 +28,13 @@ from team_dashboard.views import (
     TeamRouteWaypointsView,
     TeamRouteHistoryBulkDeleteView,
     TeamRouteHistoryDownloadCSVView,
+    TeamDriverRouteCreateView,
+    TeamRouteDetailManageView,
+    TeamRouteMapUpdateView,
+    TeamRoutePermitListCreateView,
+    TeamRoutePermitDetailView,
+    TeamRouteWaypointListCreateView,
+    TeamRouteWaypointDetailView,
     # Manage — Plan
     TeamPlanView,
     # Utility
@@ -90,9 +97,16 @@ urlpatterns = [
     # 4. MANAGE — ROUTE HISTORY
     # -------------------------------------------------------------
     path("manage/route-history/", TeamRouteHistoryListView.as_view(), name="team-route-history-list"),
-    path("manage/route-history/<int:route_id>/waypoints/", TeamRouteWaypointsView.as_view(), name="team-route-waypoints"),
+    path("manage/team-users/<int:user_id>/routes/", TeamDriverRouteCreateView.as_view(), name="team-driver-route-create"),
     path("manage/route-history/bulk-delete/", TeamRouteHistoryBulkDeleteView.as_view(), name="team-route-history-bulk-delete"),
     path("manage/route-history/download/", TeamRouteHistoryDownloadCSVView.as_view(), name="team-route-history-download-csv"),
+    path("manage/route-history/<int:route_id>/", TeamRouteDetailManageView.as_view(), name="team-route-detail-manage"),
+    path("manage/route-history/<int:route_id>/map/", TeamRouteMapUpdateView.as_view(), name="team-route-map-update"),
+    path("manage/route-history/<int:route_id>/waypoints/", TeamRouteWaypointsView.as_view(), name="team-route-waypoints"),
+    path("manage/route-history/<int:route_id>/permits/", TeamRoutePermitListCreateView.as_view(), name="team-route-permit-create"),
+    path("manage/route-history/<int:route_id>/permits/<int:permit_id>/", TeamRoutePermitDetailView.as_view(), name="team-route-permit-detail"),
+    path("manage/route-history/<int:route_id>/permits/<int:permit_id>/waypoints/", TeamRouteWaypointListCreateView.as_view(), name="team-route-permit-waypoint-create"),
+    path("manage/route-history/<int:route_id>/permits/<int:permit_id>/waypoints/<int:waypoint_id>/", TeamRouteWaypointDetailView.as_view(), name="team-route-permit-waypoint-detail"),
 
     # -------------------------------------------------------------
     # 5. MANAGE — PLAN

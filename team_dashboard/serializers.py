@@ -457,3 +457,77 @@ class TeamPermissionTreeResponseSerializer(serializers.Serializer):
     all_permissions = serializers.ListField(child=serializers.CharField())
 
 
+
+
+class TeamRouteWaypointWriteSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False)
+    index = serializers.IntegerField(required=False)
+    name = serializers.CharField(required=True, max_length=255)
+    waypoint_type = serializers.CharField(required=False, default="CHECKPOINT")
+    latitude = serializers.FloatField(required=True)
+    longitude = serializers.FloatField(required=True)
+    description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    icon = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    eta_minutes = serializers.IntegerField(required=False, min_value=0, default=0)
+
+
+class TeamRoutePermitWriteSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False)
+    index = serializers.IntegerField(required=False)
+    name = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    start_location = serializers.CharField(required=True, allow_blank=True, max_length=255)
+    start_latitude = serializers.FloatField(required=True)
+    start_longitude = serializers.FloatField(required=True)
+    end_location = serializers.CharField(required=True, allow_blank=True, max_length=255)
+    end_latitude = serializers.FloatField(required=True)
+    end_longitude = serializers.FloatField(required=True)
+    permit_file = serializers.FileField(required=False)
+    permit_text = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    waypoints = TeamRouteWaypointWriteSerializer(many=True, required=False)
+
+
+class TeamRouteCreateRequestSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    start_location = serializers.CharField(required=True, allow_blank=True, max_length=255)
+    start_latitude = serializers.FloatField(required=True)
+    start_longitude = serializers.FloatField(required=True)
+    end_location = serializers.CharField(required=True, allow_blank=True, max_length=255)
+    end_latitude = serializers.FloatField(required=True)
+    end_longitude = serializers.FloatField(required=True)
+    permit_file = serializers.FileField(required=False)
+    permit_text = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    waypoints = TeamRouteWaypointWriteSerializer(many=True, required=False)
+
+
+class TeamRouteUpdateRequestSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    status = serializers.CharField(required=False)
+    is_completed = serializers.BooleanField(required=False)
+    total_distance_km = serializers.FloatField(required=False, min_value=0)
+    estimated_duration = serializers.IntegerField(required=False, min_value=0)
+
+
+class TeamRouteMapUpdateRequestSerializer(TeamRouteUpdateRequestSerializer):
+    permits = TeamRoutePermitWriteSerializer(many=True, required=False)
+    delete_missing_permits = serializers.BooleanField(required=False, default=False)
+    replace_waypoints = serializers.BooleanField(required=False, default=True)
+
+
+class TeamRouteMutationResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    route_id = serializers.IntegerField()
+
+
+class TeamRoutePermitMutationResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    permit_id = serializers.IntegerField(required=False)
+
+
+class TeamRouteWaypointMutationResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    waypoint_id = serializers.IntegerField(required=False)

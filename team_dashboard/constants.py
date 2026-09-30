@@ -13,7 +13,6 @@ TEAM_DASHBOARD_PERMISSIONS = [
     "manage.admin_users",
     "manage.admin_users.add",
     "manage.team_users",
-    "manage.route_history.my",
     "manage.route_history.team",
     "manage.plan",
 
@@ -53,10 +52,7 @@ TEAM_PERMISSION_TREE = [
                 "key": "manage.route_history.team",
                 "label": "Team Route History (All Drivers)",
             },
-            {
-                "key": "manage.route_history.my",
-                "label": "My Route History (Own Routes Only)",
-            },
+
             {"key": "manage.plan", "label": "Plan"},
         ],
     },
