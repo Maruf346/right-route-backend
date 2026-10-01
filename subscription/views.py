@@ -143,6 +143,12 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
             }, status=status.HTTP_200_OK
         )
 
+    @extend_schema(
+        operation_id="subscription_purchase_create",
+        summary="Create pending subscription before app-store checkout",
+        request=PurchaseSubscriptionSerializer,
+        responses={201: PurchaseSubscriptionResponseSerializer},
+    )
     @action(detail=False, methods=["post"])
     def purchase(self, request, *args, **kwargs):
         serializer = PurchaseSubscriptionSerializer(data=request.data,context={"request": request})
@@ -163,6 +169,12 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
             status=status.HTTP_201_CREATED
         )
     
+    @extend_schema(
+        operation_id="subscription_purchase_verify",
+        summary="Record app-store purchase and activate subscription",
+        request=VerifyPurchaseSerializer,
+        responses={200: VerifyPurchaseResponseSerializer},
+    )
     @action(detail=False, methods=["post"], url_path="purchase-verify")
     def purchase_verify(self, request, *args, **kwargs):
         serializer = VerifyPurchaseSerializer(data=request.data)

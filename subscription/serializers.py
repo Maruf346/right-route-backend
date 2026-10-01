@@ -248,3 +248,19 @@ class VerifyPurchaseSerializer(serializers.Serializer):
             raise serializers.ValidationError({"receipt_data": "Required for iOS purchases when transaction_id is not enough."})
         return attrs
 
+
+
+class PurchaseSubscriptionResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    data = UserSubscriptionSerializer()
+
+
+class VerifyPurchaseResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    subscription_status = serializers.CharField()
+    purchase_id = serializers.IntegerField()
+    transaction_id = serializers.CharField()
+    verification_status = serializers.CharField()
+    data = UserSubscriptionSerializer()
