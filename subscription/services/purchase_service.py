@@ -4,10 +4,16 @@ from datetime import timedelta
 from subscription.models import UserSubscription, SubscriptionPlan
 from account.models import Team
 from .validators import SubscriptionValidator
-from core.constants import PlanType, UserSubscriptionStatus, PaymentStatus
+from core.constants import PlanType, BillingType, UserSubscriptionStatus, PaymentStatus
 import uuid
 
 class SubscriptionPurchaseService:
+    @staticmethod
+    def get_plan_duration(plan):
+        if plan.billing_type == BillingType.YEARLY:
+            return timedelta(days=365)
+        return timedelta(days=30)
+
     @classmethod
     @transaction.atomic
     def create_pending_subscription(
@@ -31,7 +37,7 @@ class SubscriptionPurchaseService:
                 status=UserSubscriptionStatus.PENDING,
                 starts_at=timezone.now(),
                 last_renew_at=timezone.now(),
-                expires_at=timezone.now() + timedelta(days=30),
+                expires_at=timezone.now() + cls.get_plan_duration(plan),
                 payment_status=PaymentStatus.PENDING
             )
         elif plan.plan_type == PlanType.INDIVIDUAL:
@@ -41,7 +47,7 @@ class SubscriptionPurchaseService:
                 status=UserSubscriptionStatus.PENDING,
                 starts_at=timezone.now(),
                 last_renew_at=timezone.now(),
-                expires_at=timezone.now() + timedelta(days=30),
+                expires_at=timezone.now() + cls.get_plan_duration(plan),
                 payment_status=PaymentStatus.PENDING
             )
         else:

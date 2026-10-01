@@ -11,13 +11,15 @@ from subscription.services.purchase_service import SubscriptionPurchaseService
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework import viewsets
-from core.constants import NotifyLogAction, PlanType, UserStatus, UserSubscriptionStatus, PaymentStatus, PURCHASE_PLATFORM
+from core.constants import NotifyLogAction, PlanType, UserStatus, UserSubscriptionStatus, PaymentStatus, PURCHASE_PLATFORM, PURCHASE_VERIFY_STATUS
 from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError
 from django.utils import timezone
 from django.db.models import Q
+from django.db import transaction
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from notification.utils import log_activity
+from subscription.services.purchase_verify import create_or_update_purchase_info
 
 
 @extend_schema(tags=["Subscription Plans - Admin"])
@@ -166,32 +168,73 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
         serializer = VerifyPurchaseSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        subscription_plan_uuid = data.get("subscription_plan_uuid")
         user = request.user
-        
-        subscription = UserSubscription.objects.get(uuid=subscription_plan_uuid)
-        if subscription.status != UserSubscriptionStatus.PENDING:
-            raise ValidationError({
-                "detail": f"Your Subscription Status is {subscription.status}."
-            })
-        subscription.status = UserSubscriptionStatus.ACTIVE
-        subscription.payment_status = PaymentStatus.PAID
-        subscription.save()
 
-        # if data["platform"] == PURCHASE_PLATFORM.ANDROID:
-        #     # TODO:
-        #     # Verify using Google Play Developer API
-        #     pass
-        # elif data["platform"] == PURCHASE_PLATFORM.IOS:
-        #     # TODO:
-        #     # Verify using App Store Server API
-        #     pass
+        subscription = UserSubscription.objects.select_related("plan").filter(
+            uuid=data.get("subscription_plan_uuid"),
+            user=user,
+        ).first()
+        if not subscription:
+            raise ValidationError({"detail": "Subscription not found for this user."})
+
+        product_id = data["product_id"]
+        if subscription.plan.product_id and subscription.plan.product_id != product_id:
+            raise ValidationError({"product_id": "Product ID does not match this subscription plan."})
+
+        purchase_time = data.get("purchase_time") or timezone.now()
+        expiry_time = data.get("expiry_time") or subscription.expires_at
+        amount = data.get("amount") if data.get("amount") is not None else subscription.plan.price
+        currency = data.get("currency") or subscription.plan.currency or "USD"
+        original_transaction_id = data.get("original_transaction_id") or data["transaction_id"]
+
+        with transaction.atomic():
+            subscription.status = UserSubscriptionStatus.ACTIVE
+            subscription.payment_status = PaymentStatus.PAID
+            subscription.auto_renew = data.get("auto_renew", False)
+            subscription.last_renew_at = purchase_time
+            subscription.expires_at = expiry_time
+            subscription.original_transaction_id = original_transaction_id
+            subscription.latest_transaction_id = data["transaction_id"]
+            subscription.save(update_fields=[
+                "status",
+                "payment_status",
+                "auto_renew",
+                "last_renew_at",
+                "expires_at",
+                "original_transaction_id",
+                "latest_transaction_id",
+                "updated_at",
+            ])
+
+            purchase_info, _ = create_or_update_purchase_info(
+                user=user,
+                subscription=subscription,
+                platform=data["platform"],
+                product_id=product_id,
+                transaction_id=data["transaction_id"],
+                original_transaction_id=original_transaction_id,
+                purchase_token=data.get("purchase_token"),
+                receipt_data=data.get("receipt_data"),
+                package_name=data.get("package_name"),
+                order_id=data.get("order_id"),
+                amount=amount,
+                currency=currency,
+                purchase_time=purchase_time,
+                expiry_time=expiry_time,
+                auto_renew=data.get("auto_renew", False),
+                verification_status=PURCHASE_VERIFY_STATUS.VERIFIED,
+                raw_response=data.get("raw_response") or {},
+            )
+
         return Response(
             {
                 "success": True,
-                "message": "Purchase verified successfully.",
-                "subscription_status": "active",
-                "data": UserSubscriptionSerializer(subscription).data
+                "message": "Purchase verified and subscription activated successfully.",
+                "subscription_status": subscription.status.lower(),
+                "purchase_id": purchase_info.id,
+                "transaction_id": purchase_info.transaction_id,
+                "verification_status": purchase_info.verification_status,
+                "data": UserSubscriptionSerializer(subscription).data,
             },
             status=status.HTTP_200_OK,
         )

@@ -8,7 +8,7 @@ from .models import SubscriptionPlan, UserSubscription
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubscriptionPlan
-        fields = ("id", "name", "plan_type", "billing_type", "team_limit", "price", "currency", "features_json", "is_active", "created_at", "updated_at", )
+        fields = ("id", "name", "product_id", "plan_type", "billing_type", "team_limit", "price", "currency", "features_json", "is_active", "created_at", "updated_at", )
         read_only_fields = ("id", "created_at", "updated_at")
 
 
@@ -16,6 +16,7 @@ class UserSubscriptionSerializer(serializers.ModelSerializer):
     plan_name = serializers.CharField( source="plan.name", read_only=True)
     plan_type = serializers.CharField( source="plan.plan_type", read_only=True)
     billing_type = serializers.CharField( source="plan.billing_type", read_only=True)
+    plan_product_id = serializers.CharField(source="plan.product_id", read_only=True)
     plan_price = serializers.DecimalField( source="plan.price", max_digits=10, decimal_places=2, read_only=True)
     team_limit = serializers.IntegerField(source="plan.team_limit",read_only=True)
     
@@ -29,11 +30,24 @@ class UserSubscriptionSerializer(serializers.ModelSerializer):
 
     # Computed Property
     is_valid = serializers.BooleanField(read_only=True)
+    purchase_verification_status = serializers.SerializerMethodField()
+    latest_purchase_transaction_id = serializers.SerializerMethodField()
 
     class Meta:
         model = UserSubscription
         exclude = ("user", "team", "plan")
 
+
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_purchase_verification_status(self, obj):
+        purchase_info = obj.purchase_info.order_by("-created_at").first()
+        return purchase_info.verification_status if purchase_info else None
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_latest_purchase_transaction_id(self, obj):
+        purchase_info = obj.purchase_info.order_by("-created_at").first()
+        return purchase_info.transaction_id if purchase_info else obj.latest_transaction_id
 
 class AdminSubscriberSerializer(serializers.ModelSerializer):
     user_id = serializers.IntegerField(source="user.id", read_only=True)
@@ -211,25 +225,26 @@ class PurchaseSubscriptionSerializer(serializers.Serializer):
 
 class VerifyPurchaseSerializer(serializers.Serializer):
     platform = serializers.ChoiceField(choices=PURCHASE_PLATFORM.choices)
-    subscription_plan_uuid = serializers.CharField(required=True)
-    transaction_id = serializers.CharField(required=False)
-    product_id = serializers.CharField(required=False)
+    subscription_plan_uuid = serializers.UUIDField(required=True)
+    product_id = serializers.CharField(required=True, max_length=100)
+    transaction_id = serializers.CharField(required=True, max_length=255)
+    original_transaction_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
     purchase_token = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     receipt_data = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    package_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    package_name = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    order_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    amount = serializers.DecimalField(required=False, allow_null=True, max_digits=10, decimal_places=2)
+    currency = serializers.CharField(required=False, allow_blank=True, max_length=10, default="USD")
+    purchase_time = serializers.DateTimeField(required=False, allow_null=True)
+    expiry_time = serializers.DateTimeField(required=False, allow_null=True)
+    auto_renew = serializers.BooleanField(required=False, default=False)
+    raw_response = serializers.JSONField(required=False, default=dict)
 
-    # def validate(self, attrs):
-    #     platform = attrs["platform"]
-    #     if platform == PURCHASE_PLATFORM.ANDROID:
-    #         if not attrs.get("purchase_token"):
-    #             raise serializers.ValidationError({
-    #                 "purchase_token": "Required for Android."
-    #             })
-    #     elif platform == PURCHASE_PLATFORM.IOS:
-    #         if not attrs.get("receipt_data"):
-    #             raise serializers.ValidationError({
-    #                 "receipt_data": "Required for iOS."
-    #             })
-    #     return attrs
-
+    def validate(self, attrs):
+        platform = attrs["platform"]
+        if platform == PURCHASE_PLATFORM.ANDROID and not attrs.get("purchase_token"):
+            raise serializers.ValidationError({"purchase_token": "Required for Android purchases."})
+        if platform == PURCHASE_PLATFORM.IOS and not (attrs.get("receipt_data") or attrs.get("transaction_id")):
+            raise serializers.ValidationError({"receipt_data": "Required for iOS purchases when transaction_id is not enough."})
+        return attrs
 

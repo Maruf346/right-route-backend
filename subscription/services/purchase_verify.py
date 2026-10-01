@@ -1,6 +1,6 @@
 from django.db import transaction
 
-from .models import PurchaseInfo
+from subscription.models import PurchaseInfo
 
 
 @transaction.atomic
@@ -15,6 +15,8 @@ def create_or_update_purchase_info(
     receipt_data=None,
     package_name=None,
     original_transaction_id=None,
+    amount=None,
+    currency="USD",
     order_id=None,
     purchase_time=None,
     expiry_time=None,
@@ -33,6 +35,8 @@ def create_or_update_purchase_info(
             "receipt_data": receipt_data,
             "package_name": package_name,
             "original_transaction_id": original_transaction_id,
+            "amount": amount,
+            "currency": currency or "USD",
             "order_id": order_id,
             "purchase_time": purchase_time,
             "expiry_time": expiry_time,
