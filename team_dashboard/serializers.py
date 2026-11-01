@@ -178,6 +178,14 @@ class TeamSendManageOTPRequestSerializer(serializers.Serializer):
     )
 
 
+class TeamManageOTPResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    masked_email = serializers.CharField()
+    action = serializers.ChoiceField(choices=["CHANGE_EMAIL", "CHANGE_PASSWORD"])
+    expires_in_seconds = serializers.IntegerField()
+
+
 class TeamChangeEmailRequestSerializer(serializers.Serializer):
     new_email = serializers.EmailField(required=True)
     current_password = serializers.CharField(required=True, write_only=True)

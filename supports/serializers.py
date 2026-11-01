@@ -728,6 +728,18 @@ class TeamSubmitTicketSerializer(serializers.Serializer):
         help_text="Up to 3 screenshot / doc files",
     )
 
+    def validate(self, attrs):
+        preferred_contact_method = attrs.get("preferred_contact_method", "Email")
+        phone = (attrs.get("phone") or "").strip()
+
+        if preferred_contact_method.upper() == "PHONE" and not phone:
+            raise serializers.ValidationError(
+                {"phone": "Phone number is required when preferred contact method is Phone."}
+            )
+
+        attrs["phone"] = phone
+        return attrs
+
     def validate_uploaded_files(self, files):
         if len(files) > MAX_ATTACHMENTS_PER_TICKET:
             raise serializers.ValidationError(

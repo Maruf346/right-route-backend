@@ -2,6 +2,9 @@ import logging
 import random
 import string
 import secrets
+from datetime import timedelta
+
+from django.db import transaction
 from django.core.mail import EmailMessage, get_connection
 from django.conf import settings
 from django.utils import timezone
@@ -10,6 +13,15 @@ from account.models import OTPVerification, User
 from core.constants import OTPPurpose
 
 logger = logging.getLogger(__name__)
+
+TEAM_MANAGE_OTP_EXPIRY_MINUTES = 10
+
+
+def is_team_manage_otp_expired(otp_object):
+    """Return whether a Team Dashboard email/password-change OTP has expired."""
+    return timezone.now() >= (
+        otp_object.created_at + timedelta(minutes=TEAM_MANAGE_OTP_EXPIRY_MINUTES)
+    )
 
 
 def mask_email_address(email):
@@ -128,7 +140,7 @@ def send_team_manage_otp_email(user, otp_code, action_label="account security"):
         <div style="background-color: #fff7ed; border: 2px dashed #ea580c; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0;">
             <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #c2410c;">{otp_code}</span>
         </div>
-        <p>This code will expire in 5 minutes. If you did not make this request, please change your password immediately.</p>
+        <p>This code will expire in {TEAM_MANAGE_OTP_EXPIRY_MINUTES} minutes. If you did not make this request, please change your password immediately.</p>
         <p>Best regards,<br><strong>RightRoute Team</strong></p>
     </div>
     """
@@ -184,25 +196,29 @@ def generate_and_send_manage_otp(user, action_label="Email/Password Change", req
     """
     otp_code = str(random.randint(100000, 999999))
 
-    # Invalidate old RESET OTPs for this user
-    OTPVerification.objects.filter(
-        user=user,
-        purpose=OTPPurpose.RESET,
-        is_verified=False,
-    ).delete()
-
     ip_address = request.META.get("REMOTE_ADDR") if request else None
     user_agent = request.META.get("HTTP_USER_AGENT", "")[:255] if request else ""
 
-    OTPVerification.objects.create(
-        user=user,
-        email=user.email,
-        otp_code=otp_code,
-        purpose=OTPPurpose.RESET,
-        ip_address=ip_address,
-        device_info=user_agent,
-    )
+    # Sending this endpoint again is the resend flow. Replace all previous
+    # unused manage codes so that only the newest code can be accepted.
+    with transaction.atomic():
+        OTPVerification.objects.filter(
+            user=user,
+            purpose=OTPPurpose.RESET,
+            is_verified=False,
+        ).delete()
 
-    send_team_manage_otp_email(user, otp_code, action_label=action_label)
+        OTPVerification.objects.create(
+            user=user,
+            email=user.email,
+            otp_code=otp_code,
+            purpose=OTPPurpose.RESET,
+            ip_address=ip_address,
+            device_info=user_agent,
+        )
+
+        # If SMTP fails, the transaction rolls back and does not leave a new
+        # unusable code in the database.
+        send_team_manage_otp_email(user, otp_code, action_label=action_label)
     return otp_code
 

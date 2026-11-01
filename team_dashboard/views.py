@@ -5,6 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiTypes
+from django.db import transaction
 from django.db.models import Q
 
 from team_dashboard.permissions import (
@@ -17,6 +18,7 @@ from team_dashboard.permissions import (
 )
 from team_dashboard.utils import (
     generate_and_send_team_otp,
+    is_team_manage_otp_expired,
     mask_email_address,
 )
 from team_dashboard.serializers import (
@@ -30,6 +32,7 @@ from team_dashboard.serializers import (
     TeamDashboardUserSessionSerializer,
     # Manage — Email/Password
     TeamSendManageOTPRequestSerializer,
+    TeamManageOTPResponseSerializer,
     TeamChangeEmailRequestSerializer,
     TeamChangePasswordRequestSerializer,
     # Manage — Admin Users
@@ -255,10 +258,14 @@ class TeamLogoutView(APIView):
 
 @extend_schema(
     tags=["Team Dashboard - Manage"],
-    summary="Send Verification Code for Email/Password Change",
-    description="Sends a 6-digit OTP to the current logged-in user's email to verify account changes.",
+    summary="Send or Resend Verification Code for Email/Password Change",
+    description=(
+        "Sends a 6-digit OTP to the current logged-in user's email. Calling this endpoint "
+        "again resends a fresh code, invalidates every previous unused manage code, and restarts "
+        "the 10-minute expiry window."
+    ),
     request=TeamSendManageOTPRequestSerializer,
-    responses={200: OpenApiResponse(description="Verification code sent successfully.")},
+    responses={200: TeamManageOTPResponseSerializer},
 )
 class TeamManageSendOTPView(APIView):
     permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
@@ -279,6 +286,8 @@ class TeamManageSendOTPView(APIView):
                 "success": True,
                 "message": f"Verification code sent to {masked_email}.",
                 "masked_email": masked_email,
+                "action": action,
+                "expires_in_seconds": 600,
             },
             status=status.HTTP_200_OK,
         )
@@ -328,20 +337,22 @@ class TeamManageChangeEmailView(APIView):
             .first()
         )
 
-        if not otp_obj or otp_obj.is_expired:
+        if not otp_obj or is_team_manage_otp_expired(otp_obj):
             return Response(
                 {"success": False, "message": "Invalid or expired verification code."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        otp_obj.is_verified = True
-        otp_obj.verified_at = timezone.now()
-        otp_obj.save(update_fields=["is_verified", "verified_at"])
+        # User has no `username` field; email is the configured login identity.
+        # Keep the email update and OTP consumption atomic so a failed update
+        # does not consume the verification code.
+        with transaction.atomic():
+            user.email = new_email
+            user.save(update_fields=["email", "updated_at"])
 
-        old_email = user.email
-        user.email = new_email
-        user.username = new_email
-        user.save(update_fields=["email", "username"])
+            otp_obj.is_verified = True
+            otp_obj.verified_at = timezone.now()
+            otp_obj.save(update_fields=["is_verified", "verified_at"])
 
         return Response(
             {
@@ -397,18 +408,19 @@ class TeamManageChangePasswordView(APIView):
             .first()
         )
 
-        if not otp_obj or otp_obj.is_expired:
+        if not otp_obj or is_team_manage_otp_expired(otp_obj):
             return Response(
                 {"success": False, "message": "Invalid or expired verification code."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        otp_obj.is_verified = True
-        otp_obj.verified_at = timezone.now()
-        otp_obj.save(update_fields=["is_verified", "verified_at"])
+        with transaction.atomic():
+            user.set_password(new_password)
+            user.save(update_fields=["password", "updated_at"])
 
-        user.set_password(new_password)
-        user.save(update_fields=["password"])
+            otp_obj.is_verified = True
+            otp_obj.verified_at = timezone.now()
+            otp_obj.save(update_fields=["is_verified", "verified_at"])
 
         return Response(
             {"success": True, "message": "Password changed successfully."},
@@ -1071,8 +1083,7 @@ class TeamUserDetailView(APIView):
             if User.objects.filter(email__iexact=email).exclude(id=member.user.id).exists():
                 return Response({"detail": "This email address is already in use."}, status=status.HTTP_400_BAD_REQUEST)
             member.user.email = email
-            member.user.username = email
-            member.user.save(update_fields=["email", "username"])
+            member.user.save(update_fields=["email", "updated_at"])
 
         return Response(TeamMemberItemSerializer(member).data, status=status.HTTP_200_OK)
 
