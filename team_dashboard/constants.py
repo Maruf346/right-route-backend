@@ -61,7 +61,7 @@ TEAM_PERMISSION_TREE = [
         "label": "Support",
         "children": [
             {"key": "support.contact_support", "label": "Contact Support"},
-            {"key": "support.help_center", "label": "Help Center"},
+            # {"key": "support.help_center", "label": "Help Center"},
             {"key": "support.submit_ticket", "label": "Submit Ticket"},
             {"key": "support.resources", "label": "Resources"},
         ],
