@@ -1463,10 +1463,18 @@ def _build_extracted_waypoints(permit, route, permit_file=None, permit_text=None
 
     route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
     intersections = (route_data or {}).get("intersection", [])
-    if intersections and len(intersections) > 1:
-        intersections = intersections[:-1]
+    start_coords = (permit.start_latitude, permit.start_longitude)
+    end_coords = (permit.end_latitude, permit.end_longitude)
 
-    waypoints = get_intersection_lat_lng(intersections) if intersections else []
+    waypoints = (
+        get_intersection_lat_lng(
+            intersections,
+            start_coords=start_coords,
+            end_coords=end_coords,
+        )
+        if intersections
+        else []
+    )
     return [
         PermitWaypoint(
             permit=permit,

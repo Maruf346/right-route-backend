@@ -72,9 +72,17 @@ def _has_permit_input(permit_file=None, permit_text=None):
 def _build_waypoint_objects(route_data, permit, route):
     """Convert extracted route intersections into unsaved PermitWaypoint instances."""
     intersections = (route_data or {}).get("intersection") or []
-    if len(intersections) > 1:
-        intersections = intersections[:-1]
-    waypoints = get_intersection_lat_lng(intersections) if intersections else []
+    start_coords = (permit.start_latitude, permit.start_longitude)
+    end_coords = (permit.end_latitude, permit.end_longitude)
+    waypoints = (
+        get_intersection_lat_lng(
+            intersections,
+            start_coords=start_coords,
+            end_coords=end_coords,
+        )
+        if intersections
+        else []
+    )
 
     waypoint_objects = []
     for index, wp in enumerate(waypoints, start=1):
