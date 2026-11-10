@@ -808,7 +808,9 @@ class TeamUsersListView(APIView):
         all_team_members = TeamMember.objects.filter(team=team)
         enrolled_count = all_team_members.filter(status=True).count()
         not_enrolled_count = all_team_members.filter(status=False).count()
-        max_members = team.max_members or 0
+        from subscription.services.validators import TeamMemberValidator
+        max_members = TeamMemberValidator.sync_team_max_members(team)
+
         slots_remaining = max(0, max_members - all_team_members.count())
 
         plan_stats = {
@@ -1339,7 +1341,8 @@ class TeamPlanView(APIView):
         members = TeamMember.objects.filter(team=team)
         enrolled_count = members.filter(status=True).count()
         registered_count = members.count()
-        max_users = team.max_members or 0
+        from subscription.services.validators import TeamMemberValidator
+        max_users = TeamMemberValidator.sync_team_max_members(team)
         slots_remaining = max(0, max_users - registered_count)
 
         data = {

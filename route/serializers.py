@@ -59,6 +59,39 @@ class RouteDetailSerializer(serializers.ModelSerializer):
     def get_permit_count(self, obj):
         return obj.permits.count()
 
+def _has_permit_input(permit_file=None, permit_text=None):
+    """Return True when an actual permit file or non-placeholder permit text is provided."""
+    if permit_file:
+        return True
+    if not permit_text:
+        return False
+    normalized = str(permit_text).strip().lower()
+    return bool(normalized and normalized != "manual route")
+
+
+def _build_waypoint_objects(route_data, permit, route):
+    """Convert extracted route intersections into unsaved PermitWaypoint instances."""
+    intersections = (route_data or {}).get("intersection") or []
+    if len(intersections) > 1:
+        intersections = intersections[:-1]
+    waypoints = get_intersection_lat_lng(intersections) if intersections else []
+
+    waypoint_objects = []
+    for index, wp in enumerate(waypoints, start=1):
+        if wp.get("lat") is not None and wp.get("lng") is not None:
+            waypoint_objects.append(
+                PermitWaypoint(
+                    permit=permit,
+                    route=route,
+                    index=index,
+                    name=wp.get("name") or f"Waypoint {index}",
+                    latitude=wp.get("lat"),
+                    longitude=wp.get("lng"),
+                )
+            )
+    return waypoint_objects
+
+
 # Route Create with Permit---
 class RouteCreateSerializer(serializers.Serializer):
     name = serializers.CharField(required=False)
@@ -68,18 +101,15 @@ class RouteCreateSerializer(serializers.Serializer):
     end_location = serializers.CharField()
     end_latitude = serializers.FloatField()
     end_longitude = serializers.FloatField()
-    permit_file = serializers.FileField(required=False)
-    permit_text = serializers.CharField(required=False)
+    permit_file = serializers.FileField(required=False, allow_null=True)
+    permit_text = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     
     def validate(self, attrs):
-        if not (attrs.get("permit_file") or attrs.get("permit_text")):
-            raise serializers.ValidationError({
-                "permit_file": "Permit file or Permit Text must be submitted."
-            })
+        # Permit file and text are optional; drivers can manually set waypoints
         return attrs
     
     def create_permit(self, validated_data, route):
-        validated_data.pop("name")
+        validated_data.pop("name", None)
         permit = RoutePermit.objects.create(
             route=route, index=1,
             **validated_data
@@ -89,24 +119,10 @@ class RouteCreateSerializer(serializers.Serializer):
     def get_waypoints(self, validated_data, permit, route):
         permit_file = validated_data.get("permit_file", None)
         permit_text = validated_data.get("permit_text", None)
+        if not _has_permit_input(permit_file=permit_file, permit_text=permit_text):
+            return []
         route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
-        intersection = route_data['intersection'][:-1]
-        
-        waypoints = get_intersection_lat_lng(intersection)
-        waypoint_objects = []
-        
-        for index, wp in enumerate(waypoints, start=1):
-            last_wp = PermitWaypoint.objects.filter(permit=permit).last()
-            waypoint = PermitWaypoint(
-                permit=permit,
-                route=route,
-                index=index,
-                name=wp.get('name', f'Waypoint {index}'),
-                latitude=wp.get('lat'),
-                longitude=wp.get('lng')
-            )
-            waypoint_objects.append(waypoint)
-        return waypoint_objects
+        return _build_waypoint_objects(route_data, permit, route)
     
     def create(self, validated_data):
         request = self.context["request"]
@@ -132,7 +148,7 @@ class PermitSerializers(serializers.ModelSerializer):
     end_location = serializers.CharField(required=True)
     permit_file = serializers.FileField(required=False, allow_null=True)
     permit_text = serializers.CharField(required=False, allow_blank=True, allow_null=True)
- 
+
     class Meta:
         model = RoutePermit
         fields = [
@@ -151,10 +167,7 @@ class PermitSerializers(serializers.ModelSerializer):
         return None
     
     def validate(self, attrs):
-        if not (attrs.get("permit_file") or attrs.get("permit_text")):
-            raise serializers.ValidationError({
-                "permit_file": "Permit file or Permit Text must be submitted."
-            })
+        # Permit file or text are optional per client requirements
         return attrs
     
     def create(self, validated_data):
@@ -170,32 +183,15 @@ class PermitSerializers(serializers.ModelSerializer):
         
         with transaction.atomic():
             permit = super().create(validated_data)
-            try:
-                route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
-            except Exception as e:
-                print(f"Error extracting route data for subsequent permit: {e}")
-                route_data = None
- 
-            intersections = (route_data or {}).get('intersection', [])
-            if intersections and len(intersections) > 1:
-                intersections = intersections[:-1]
-            waypoints = get_intersection_lat_lng(intersections) if intersections else []
-            waypoint_objects = []
-            for index, wp in enumerate(waypoints, start=1):
-                if wp.get('lat') is not None and wp.get('lng') is not None:
-                    waypoint = PermitWaypoint(
-                        permit=permit,
-                        route=route,
-                        index=index,
-                        name=wp.get('name') or f'Waypoint {index}',
-                        latitude=wp.get('lat'),
-                        longitude=wp.get('lng')
-                    )
-                    waypoint_objects.append(waypoint)
-            
-            # Bulk create for database efficiency
-            if waypoint_objects:
-                PermitWaypoint.objects.bulk_create(waypoint_objects)
+            if _has_permit_input(permit_file=permit_file, permit_text=permit_text):
+                try:
+                    route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
+                except Exception as e:
+                    print(f"Error extracting route data for subsequent permit: {e}")
+                    route_data = None
+                waypoint_objects = _build_waypoint_objects(route_data, permit, route)
+                if waypoint_objects:
+                    PermitWaypoint.objects.bulk_create(waypoint_objects)
             return permit
     
     def update(self, instance, validated_data):
@@ -203,36 +199,19 @@ class PermitSerializers(serializers.ModelSerializer):
         permit_text = validated_data.get('permit_text', None)
         with transaction.atomic():
             instance = super().update(instance, validated_data)
-            if permit_file or permit_text:
+            if _has_permit_input(permit_file=permit_file, permit_text=permit_text):
                 instance.waypoints.all().delete()
                 try:
                     route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
                 except Exception as e:
                     print(f"Error extracting route data for permit update: {e}")
                     route_data = None
- 
-                intersections = (route_data or {}).get('intersection', [])
-                if intersections and len(intersections) > 1:
-                    intersections = intersections[:-1]
-                waypoints = get_intersection_lat_lng(intersections) if intersections else []
- 
-                waypoint_objects = []
-                for index, wp in enumerate(waypoints, start=1):
-                    if wp.get('lat') is not None and wp.get('lng') is not None:
-                        waypoint = PermitWaypoint(
-                            permit=instance,
-                            route=instance.route,
-                            index=index,
-                            name=wp.get('name') or f'Waypoint {index}',
-                            latitude=wp.get('lat'),
-                            longitude=wp.get('lng')
-                        )
-                        waypoint_objects.append(waypoint)
+                waypoint_objects = _build_waypoint_objects(route_data, instance, instance.route)
                 if waypoint_objects:
                     PermitWaypoint.objects.bulk_create(waypoint_objects)
             return instance
- 
- 
+
+
 class RouteBulkDeleteSerializer(serializers.Serializer):
     route_ids = serializers.ListField(child=serializers.IntegerField(), min_length=1)
 

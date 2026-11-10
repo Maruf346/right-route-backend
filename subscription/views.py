@@ -218,6 +218,12 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
                 "updated_at",
             ])
 
+            if subscription.plan.plan_type == PlanType.TEAM and subscription.plan.team_limit:
+                team = getattr(user, "owned_team", None) or subscription.team
+                if team:
+                    team.max_members = subscription.plan.team_limit
+                    team.save(update_fields=["max_members"])
+
             purchase_info, _ = create_or_update_purchase_info(
                 user=user,
                 subscription=subscription,

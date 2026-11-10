@@ -93,6 +93,35 @@ class TeamMemberValidator:
             .first()
         )
 
+    @staticmethod
+    def sync_team_max_members(team, subscription=None):
+        """Sync and return team.max_members from a valid team subscription when unset."""
+        if not team:
+            return 0
+        if team.max_members and team.max_members > 0:
+            return team.max_members
+
+        if subscription is None:
+            owner_subs = (
+                UserSubscription.objects.select_related("plan")
+                .filter(Q(user=team.owner) | Q(team=team), plan__plan_type=PlanType.TEAM)
+                .order_by("-created_at")
+            )
+            subscription = SubscriptionValidator.has_valid_subscription(owner_subs).first()
+        elif not subscription.is_valid:
+            subscription = None
+
+        if (
+            subscription
+            and subscription.plan
+            and subscription.plan.plan_type == PlanType.TEAM
+            and subscription.plan.team_limit
+        ):
+            team.max_members = subscription.plan.team_limit
+            team.save(update_fields=["max_members"])
+
+        return team.max_members or 0
+
     @classmethod
     def validate_add_member(cls, owner, target_user):
         team = owner.owned_team

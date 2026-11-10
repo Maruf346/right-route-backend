@@ -16,6 +16,7 @@ class TeamDetailSerializer(serializers.ModelSerializer):
     owner_email = serializers.EmailField(source="owner.email", read_only=True)
     used_members = serializers.SerializerMethodField()
     members = TeamMemberSerializer(many=True,read_only=True)
+    max_members = serializers.SerializerMethodField()
 
     class Meta:
         model = Team
@@ -25,6 +26,9 @@ class TeamDetailSerializer(serializers.ModelSerializer):
         return obj.members.filter(
             status=True
         ).count()
+
+    def get_max_members(self, obj):
+        return TeamMemberValidator.sync_team_max_members(obj)
 
 
 
