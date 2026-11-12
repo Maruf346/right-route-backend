@@ -632,8 +632,8 @@ class WebsiteTicketCreateSerializer(serializers.Serializer):
             )
 
         # Trigger emails
-        send_customer_confirmation_email(ticket)
-        send_staff_notification_email(ticket)
+        ticket.customer_confirmation_sent = send_customer_confirmation_email(ticket)
+        ticket.staff_notification_sent = send_staff_notification_email(ticket)
 
         return ticket
 
@@ -849,8 +849,8 @@ class TeamSubmitTicketSerializer(serializers.Serializer):
             )
 
         # Trigger emails
-        send_customer_confirmation_email(ticket)
-        send_staff_notification_email(ticket)
+        ticket.customer_confirmation_sent = send_customer_confirmation_email(ticket)
+        ticket.staff_notification_sent = send_staff_notification_email(ticket)
 
         return ticket
 

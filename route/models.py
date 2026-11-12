@@ -52,6 +52,8 @@ class RoutePermit(BaseModel):
     route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name="permits")
     index = models.PositiveIntegerField(blank=True, null=True)
     name = models.CharField(max_length=255, blank=True, null=True)
+    permit_number = models.CharField(max_length=100, blank=True, null=True)
+    issuing_state = models.CharField(max_length=2, blank=True, null=True, db_index=True)
     
     start_location = models.CharField(max_length=255, blank=True, help_text="Start Location Name")
     start_latitude = models.FloatField(help_text="Start location - Latitude")

@@ -957,9 +957,13 @@ class TeamDataProtectionPrefillView(APIView):
 
         name = ""
         phone = ""
-        if hasattr(user, "team_admin_profile") and user.team_admin_profile.full_name:
-            name = user.team_admin_profile.full_name
-            phone = user.team_admin_profile.phone_number or ""
+        team_admin_profile = getattr(user, "team_admin_profile", None)
+        if team_admin_profile:
+            name = team_admin_profile.full_name or user.email.split("@")[0]
+            # TeamAdminProfile stores the optional contact number as `phone`.
+            # The response remains `phone_number` to match the data-protection
+            # form and DataProtectionRequest model.
+            phone = team_admin_profile.phone or ""
         elif hasattr(user, "team_member_profile") and user.team_member_profile.username:
             name = user.team_member_profile.username
         else:

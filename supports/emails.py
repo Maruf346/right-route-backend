@@ -10,15 +10,10 @@ from core.models import EmailConfig
 
 logger = logging.getLogger(__name__)
 
-STAFF_SUPPORT_EMAIL = "help@getrightroute.app"
-
-
-def _get_connection():
-    """Return a Django mail connection from the active EmailConfig."""
+def _get_connection_and_sender():
+    """Use active EmailConfig, falling back to the configured EMAIL_* SMTP settings."""
     config = EmailConfig.objects.filter(is_active=True).first()
-    if not config:
-        return None, None
-    try:
+    if config:
         conn = get_connection(
             backend="django.core.mail.backends.smtp.EmailBackend",
             host=config.host,
@@ -26,26 +21,38 @@ def _get_connection():
             username=config.host_user,
             password=config.host_password,
             use_tls=config.tls,
+            use_ssl=config.ssl,
             fail_silently=False,
         )
-        return conn, config
-    except Exception as e:
-        logger.error(f"Failed to initialize email connection: {e}")
-        return None, None
+        sender = f"{config.name or 'RightRoute Support'} <{config.email}>"
+        return conn, sender
+
+    if not getattr(settings, "EMAIL_HOST", None):
+        raise RuntimeError("No active EmailConfig and EMAIL_HOST is not configured.")
+    if not getattr(settings, "EMAIL_HOST_USER", None) or not getattr(settings, "EMAIL_HOST_PASSWORD", None):
+        raise RuntimeError("SMTP email username/password are not configured.")
+
+    conn = get_connection(
+        backend=getattr(settings, "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"),
+        host=settings.EMAIL_HOST,
+        port=int(getattr(settings, "EMAIL_PORT", 587)),
+        username=settings.EMAIL_HOST_USER,
+        password=settings.EMAIL_HOST_PASSWORD,
+        use_tls=getattr(settings, "EMAIL_USE_TLS", False),
+        use_ssl=getattr(settings, "EMAIL_USE_SSL", False),
+        fail_silently=False,
+    )
+    sender = getattr(settings, "DEFAULT_FROM_EMAIL", settings.EMAIL_HOST_USER)
+    return conn, sender
 
 
 def _send_email(subject, body_html, to_emails):
-    """Safely sends HTML email with fallback logging."""
-    conn, config = _get_connection()
-    if not conn or not config:
-        logger.warning(f"Skipping email to {to_emails} - no active EmailConfig found.")
-        return False
-
-    from_sender = f"{config.name or 'RightRoute Support'} <{config.email}>"
+    """Send an HTML email and return whether the SMTP backend accepted it."""
     if isinstance(to_emails, str):
         to_emails = [to_emails]
 
     try:
+        conn, from_sender = _get_connection_and_sender()
         msg = EmailMessage(
             subject=subject,
             body=body_html,
@@ -54,7 +61,11 @@ def _send_email(subject, body_html, to_emails):
             connection=conn,
         )
         msg.content_subtype = "html"
-        msg.send(fail_silently=False)
+        sent_count = msg.send(fail_silently=False)
+        if sent_count != 1:
+            logger.error(f"Support email backend accepted {sent_count} messages for {to_emails}.")
+            return False
+        logger.info(f"Support email sent to {to_emails}: {subject}")
         return True
     except Exception as e:
         logger.error(f"Error sending support email to {to_emails}: {e}")
@@ -116,7 +127,7 @@ def send_staff_notification_email(ticket):
         <p><a href="{dashboard_url}" style="background-color: #1a56db; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block;">Open Ticket in Admin Dashboard</a></p>
     </div>
     """
-    return _send_email(subject, body_html, STAFF_SUPPORT_EMAIL)
+    return _send_email(subject, body_html, settings.SUPPORT_TICKET_RECIPIENT_EMAIL)
 
 
 def send_assignment_email(ticket, assignee_user, assignee_name=None):

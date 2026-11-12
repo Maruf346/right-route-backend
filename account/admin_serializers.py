@@ -66,6 +66,10 @@ class AdminLoginSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Account is inactive."
             )
+        if user.status == UserStatus.BLOCKED:
+            raise serializers.ValidationError(
+                "Account is locked."
+            )
         if user.user_type != UserType.ADMIN:
             raise serializers.ValidationError(
                 "Only Admin can Login."

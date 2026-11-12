@@ -1,8 +1,12 @@
+import logging
+import re
+
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiTypes
 from django.db import transaction
@@ -17,6 +21,7 @@ from team_dashboard.permissions import (
     is_team_super_admin,
 )
 from team_dashboard.utils import (
+    create_and_send_team_driver_invite,
     generate_and_send_team_otp,
     is_team_manage_otp_expired,
     mask_email_address,
@@ -59,16 +64,21 @@ from team_dashboard.serializers import (
     TeamRouteMutationResponseSerializer,
     TeamRoutePermitMutationResponseSerializer,
     TeamRouteWaypointMutationResponseSerializer,
+    TeamPermitParseRequestSerializer,
+    TeamPermitParseResponseSerializer,
     # Manage — Plan
     TeamPlanDetailSerializer,
     TeamUsersListResponseSerializer,
     TeamUsersProcessResponseSerializer,
+    TeamUsersInviteFailureResponseSerializer,
     TeamUsersImportResponseSerializer,
     TeamUsersImportCSVRequestSerializer,
     TeamAdminGeneratePasswordResponseSerializer,
     TeamPermissionTreeResponseSerializer,
 )
 from team_dashboard.constants import TeamDashboardRole, TEAM_DASHBOARD_PERMISSIONS
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -610,6 +620,14 @@ class TeamAdminUserDetailView(APIView):
             if profile.user_id == profile.team.owner_id:
                 return Response({"detail": "Cannot modify owner's active status."}, status=status.HTTP_400_BAD_REQUEST)
             profile.is_active = is_active
+            if not is_active:
+                from account.models import OTPVerification
+                from core.constants import OTPPurpose
+                OTPVerification.objects.filter(
+                    user=profile.user,
+                    purpose=OTPPurpose.LOGIN,
+                    is_verified=False,
+                ).delete()
 
         if password:
             profile.user.set_password(password)
@@ -666,6 +684,15 @@ class TeamAdminUserLockView(APIView):
         profile.updated_by = request.user
         profile.save(update_fields=["is_active", "updated_by"])
 
+        # Prevent an OTP requested before lockout from completing login.
+        from account.models import OTPVerification
+        from core.constants import OTPPurpose
+        OTPVerification.objects.filter(
+            user=profile.user,
+            purpose=OTPPurpose.LOGIN,
+            is_verified=False,
+        ).delete()
+
         return Response({"success": True, "message": f"{profile.full_name or profile.user.email} locked out successfully."}, status=status.HTTP_200_OK)
 
 
@@ -720,7 +747,15 @@ class TeamAdminUserBulkActionView(APIView):
 
         count = 0
         if action == "lock":
+            locked_user_ids = list(profiles.values_list("user_id", flat=True))
             count = profiles.update(is_active=False)
+            from account.models import OTPVerification
+            from core.constants import OTPPurpose
+            OTPVerification.objects.filter(
+                user_id__in=locked_user_ids,
+                purpose=OTPPurpose.LOGIN,
+                is_verified=False,
+            ).delete()
         elif action == "unlock":
             count = profiles.update(is_active=True)
         elif action == "delete":
@@ -758,6 +793,75 @@ class TeamAdminGeneratePasswordView(APIView):
 # =====================================================================
 # 3. MANAGE — TEAM USERS (DRIVERS) VIEWS
 # =====================================================================
+
+def _normalize_csv_header(value):
+    """Normalize Excel/CSV headers such as 'First Name', 'first_name', or BOM-prefixed names."""
+    normalized = str(value or "").lstrip("\ufeff").strip().casefold()
+    return re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
+
+
+def _team_member_values_from_csv_row(row):
+    clean_row = {
+        _normalize_csv_header(key): str(value or "").strip()
+        for key, value in row.items()
+        if key
+    }
+    email = (
+        clean_row.get("email")
+        or clean_row.get("email_address")
+        or clean_row.get("e_mail")
+        or ""
+    )
+    name = (
+        clean_row.get("name")
+        or clean_row.get("full_name")
+        or clean_row.get("driver_name")
+        or clean_row.get("user")
+        or ""
+    )
+    if not name:
+        name = " ".join(
+            part
+            for part in (
+                clean_row.get("first_name", ""),
+                clean_row.get("last_name", ""),
+            )
+            if part
+        ).strip()
+    return name, email
+
+
+def _upsert_team_member_and_send_invite(team, name, email):
+    """Use one reliable creation path for manual and CSV-added drivers."""
+    from account.models import TeamMember, User
+    from core.constants import UserType
+    from team_dashboard.utils import generate_secure_password
+
+    with transaction.atomic():
+        user_obj = User.objects.filter(email__iexact=email).first()
+        if not user_obj:
+            user_obj = User.objects.create(
+                email=email,
+                user_type=UserType.MAIN_USER,
+                is_active=True,
+            )
+            user_obj.set_password(generate_secure_password(16))
+            user_obj.save(update_fields=["password", "updated_at"])
+
+        member_obj, created = TeamMember.objects.get_or_create(
+            team=team,
+            user=user_obj,
+            defaults={"username": name, "status": False},
+        )
+        if created:
+            # SMTP failures roll back the member and invitation so retrying the
+            # same request can send a fresh, valid invitation.
+            create_and_send_team_driver_invite(team, member_obj)
+        else:
+            member_obj.username = name
+            member_obj.save(update_fields=["username", "updated_at"])
+        return member_obj, created
+
 
 @extend_schema(
     tags=["Team Dashboard - Manage Team Users"],
@@ -800,7 +904,7 @@ class TeamUsersListView(APIView):
             )
 
         # Enrolled filter
-        enrolled = request.query_params.get("enrolled")
+        enrolled = (request.query_params.get("enrolled") or "").strip().casefold()
         if enrolled == "yes":
             members_qs = members_qs.filter(status=True)
         elif enrolled == "no":
@@ -846,7 +950,13 @@ class TeamUsersListView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(request=TeamMemberBatchAddSerializer, responses={200: TeamUsersProcessResponseSerializer})
+    @extend_schema(
+        request=TeamMemberBatchAddSerializer,
+        responses={
+            200: TeamUsersProcessResponseSerializer,
+            502: TeamUsersInviteFailureResponseSerializer,
+        },
+    )
     def post(self, request):
         """Batch Add/Edit users from list"""
         team = get_team_for_user(request.user)
@@ -854,9 +964,7 @@ class TeamUsersListView(APIView):
             return Response({"detail": "Team not found."}, status=status.HTTP_404_NOT_FOUND)
 
         from team_dashboard.serializers import TeamMemberBatchAddSerializer
-        from account.models import User, TeamMember
-        from core.constants import UserType, CurrentPlanType
-        from team_dashboard.utils import generate_secure_password
+        from account.models import TeamMember
 
         serializer = TeamMemberBatchAddSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -872,28 +980,21 @@ class TeamUsersListView(APIView):
             name = item["name"].strip()
             email = item["email"].strip().lower()
 
-            user_obj = User.objects.filter(email__iexact=email).first()
-            if not user_obj:
-                user_obj = User.objects.create(
-                    email=email,
-                    user_type=UserType.MAIN_USER,
-                    is_active=True,
+            try:
+                _member_obj, created = _upsert_team_member_and_send_invite(team, name, email)
+            except Exception:
+                logger.exception("Unable to create or invite team driver %s", email)
+                return Response(
+                    {
+                        "success": False,
+                        "detail": "The driver could not be added because the invitation email failed. Please retry.",
+                        "added_count": added_count,
+                        "updated_count": updated_count,
+                    },
+                    status=status.HTTP_502_BAD_GATEWAY,
                 )
-                user_obj.set_password(generate_secure_password(16))
-                user_obj.save()
-
-            member_obj, created = TeamMember.objects.get_or_create(
-                team=team,
-                user=user_obj,
-                defaults={"username": name, "status": False},
-            )
-
-            if created:
-                added_count += 1
-            else:
-                member_obj.username = name
-                member_obj.save(update_fields=["username"])
-                updated_count += 1
+            added_count += int(created)
+            updated_count += int(not created)
 
         return Response(
             {
@@ -926,10 +1027,6 @@ class TeamUsersImportCSVView(APIView):
 
         import csv
         import io
-        from account.models import User, TeamMember
-        from core.constants import UserType, CurrentPlanType
-        from team_dashboard.utils import generate_secure_password
-
         try:
             decoded_file = csv_file.read().decode("utf-8-sig")
             io_string = io.StringIO(decoded_file)
@@ -942,10 +1039,7 @@ class TeamUsersImportCSVView(APIView):
         errors = []
 
         for row_idx, row in enumerate(reader, start=1):
-            # Normalize keys
-            clean_row = {k.strip().lower(): v.strip() for k, v in row.items() if k}
-            name = clean_row.get("name") or clean_row.get("full_name") or clean_row.get("user") or ""
-            email = clean_row.get("email") or clean_row.get("email_address") or ""
+            name, email = _team_member_values_from_csv_row(row)
 
             if not email or "@" not in email:
                 errors.append(f"Row {row_idx}: Invalid or missing email.")
@@ -954,27 +1048,14 @@ class TeamUsersImportCSVView(APIView):
             email = email.lower()
             name = name or email.split("@")[0]
 
-            user_obj = User.objects.filter(email__iexact=email).first()
-            if not user_obj:
-                user_obj = User.objects.create(
-                    email=email,
-                    user_type=UserType.MAIN_USER,
-                    is_active=True,
-                )
-                user_obj.set_password(generate_secure_password(16))
-                user_obj.save()
-
-            member_obj, created = TeamMember.objects.get_or_create(
-                team=team,
-                user=user_obj,
-                defaults={"username": name, "status": False},
-            )
-            if created:
-                added += 1
-            else:
-                member_obj.username = name
-                member_obj.save(update_fields=["username"])
-                updated += 1
+            try:
+                _member_obj, created = _upsert_team_member_and_send_invite(team, name, email)
+            except Exception:
+                logger.exception("Unable to import or invite team driver on CSV row %s", row_idx)
+                errors.append(f"Row {row_idx}: Invitation email failed; the user was not added.")
+                continue
+            added += int(created)
+            updated += int(not created)
 
         return Response(
             {
@@ -1392,6 +1473,34 @@ class TeamPermissionTreeView(APIView):
 # TEAM DASHBOARD ROUTE MANAGEMENT HELPERS / VIEWS
 # =====================================================================
 
+@extend_schema(
+    tags=["Team Dashboard - Route Management"],
+    summary="Parse a permit into state-bounded route points",
+    description=(
+        "Accepts one PDF/image file or raw permit_text. OCR-extracted locations are "
+        "geocoded only within the detected issuing state (or state_hint). Unresolved "
+        "locations are reported instead of being placed in another state."
+    ),
+    request=TeamPermitParseRequestSerializer,
+    responses={200: TeamPermitParseResponseSerializer},
+)
+class TeamPermitParseView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    required_team_permission = "manage.route_history.team"
+
+    def post(self, request):
+        from route.service import parse_permit_route
+
+        serializer = TeamPermitParseRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        parsed = parse_permit_route(
+            permit_file=serializer.validated_data.get("file"),
+            permit_text=serializer.validated_data.get("permit_text"),
+            state_hint=serializer.validated_data.get("state_hint"),
+        )
+        return Response(parsed, status=status.HTTP_200_OK)
+
 def _team_can_manage_all_routes(user):
     return is_team_super_admin(user) or ("manage.route_history.team" in get_user_team_permissions(user))
 
@@ -1456,6 +1565,74 @@ def _sync_route_waypoint_count(route):
     return total
 
 
+def _same_coordinates(lat1, lng1, lat2, lng2, tolerance=0.0001):
+    return abs(lat1 - lat2) <= tolerance and abs(lng1 - lng2) <= tolerance
+
+
+def _validate_permit_against_neighbors(route, payload, permit=None):
+    """Prevent gaps between a permit and its adjacent permit segments."""
+    from route.models import RoutePermit
+
+    index = payload.get("index") or (permit.index if permit else None)
+    if index is None:
+        return
+    start_lat = payload.get("start_latitude", getattr(permit, "start_latitude", None))
+    start_lng = payload.get("start_longitude", getattr(permit, "start_longitude", None))
+    end_lat = payload.get("end_latitude", getattr(permit, "end_latitude", None))
+    end_lng = payload.get("end_longitude", getattr(permit, "end_longitude", None))
+
+    previous = RoutePermit.objects.filter(route=route, index__lt=index).order_by("-index").first()
+    following = RoutePermit.objects.filter(route=route, index__gt=index).order_by("index").first()
+    if previous and not _same_coordinates(previous.end_latitude, previous.end_longitude, start_lat, start_lng):
+        raise ValidationError({
+            "start_latitude": f"Permit {index} start must match Permit {previous.index} end.",
+            "start_longitude": f"Permit {index} start must match Permit {previous.index} end.",
+        })
+    if following and not _same_coordinates(end_lat, end_lng, following.start_latitude, following.start_longitude):
+        raise ValidationError({
+            "end_latitude": f"Permit {index} end must match Permit {following.index} start.",
+            "end_longitude": f"Permit {index} end must match Permit {following.index} start.",
+        })
+
+
+def _shift_waypoint_indexes_for_insert(permit, insertion_index):
+    """Create one index slot without violating the (permit, index) unique key."""
+    from django.db.models import F
+
+    queryset = permit.waypoints.filter(index__gte=insertion_index)
+    queryset.update(index=F("index") + 1000000)
+    queryset.update(index=F("index") - 999999)
+
+
+def _compact_waypoint_indexes(permit):
+    """Renumber remaining waypoints to 1..N after a deletion."""
+    from django.db.models import F
+    from route.models import PermitWaypoint
+
+    waypoints = list(permit.waypoints.order_by("index", "id"))
+    permit.waypoints.update(index=F("index") + 1000000)
+    for position, waypoint in enumerate(waypoints, start=1):
+        waypoint.index = position
+    if waypoints:
+        PermitWaypoint.objects.bulk_update(waypoints, ["index"])
+
+
+def _move_waypoint_to_index(permit, waypoint, desired_index):
+    """Move one waypoint while preserving a unique, contiguous order."""
+    from django.db.models import F
+    from route.models import PermitWaypoint
+
+    waypoints = list(permit.waypoints.order_by("index", "id"))
+    if desired_index < 1 or desired_index > len(waypoints):
+        raise ValidationError({"index": f"Index must be between 1 and {len(waypoints)}."})
+    ordered = [item for item in waypoints if item.id != waypoint.id]
+    ordered.insert(desired_index - 1, waypoint)
+    permit.waypoints.update(index=F("index") + 1000000)
+    for position, item in enumerate(ordered, start=1):
+        item.index = position
+    PermitWaypoint.objects.bulk_update(ordered, ["index"])
+
+
 def _build_extracted_waypoints(permit, route, permit_file=None, permit_text=None):
     if not (permit_file or permit_text):
         return []
@@ -1463,7 +1640,11 @@ def _build_extracted_waypoints(permit, route, permit_file=None, permit_text=None
     from route.models import PermitWaypoint
     from route.service import extract_route_data, get_intersection_lat_lng
 
-    route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
+    route_data = extract_route_data(
+        permit_file=permit_file,
+        permit_text=permit_text,
+        state_hint=permit.issuing_state,
+    )
     intersections = (route_data or {}).get("intersection", [])
     start_coords = (permit.start_latitude, permit.start_longitude)
     end_coords = (permit.end_latitude, permit.end_longitude)
@@ -1473,6 +1654,7 @@ def _build_extracted_waypoints(permit, route, permit_file=None, permit_text=None
             intersections,
             start_coords=start_coords,
             end_coords=end_coords,
+            state_hint=permit.issuing_state,
         )
         if intersections
         else []
@@ -1501,7 +1683,9 @@ def _replace_permit_waypoints(permit, route, waypoints_data):
             PermitWaypoint(
                 permit=permit,
                 route=route,
-                index=item.get("index") or position,
+                # The array order is authoritative for a full replacement. This
+                # guarantees contiguous indexes even if the client sends stale IDs.
+                index=position,
                 name=item["name"],
                 waypoint_type=item.get("waypoint_type") or "CHECKPOINT",
                 latitude=item["latitude"],
@@ -1526,6 +1710,7 @@ def _create_or_update_permit(route, validated_data, permit=None, replace_waypoin
     if permit is None:
         current_max = RoutePermit.objects.filter(route=route).aggregate(Max("index"))["index__max"]
         validated_data["index"] = validated_data.get("index") or ((current_max or 0) + 1)
+        validated_data["name"] = validated_data.get("name") or f"Permit {validated_data['index']}"
         permit = RoutePermit.objects.create(route=route, **validated_data)
     else:
         for field, value in validated_data.items():
@@ -1569,6 +1754,7 @@ class TeamDriverRouteCreateView(APIView):
         serializer = TeamRouteCreateRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
+        permits_data = data.pop("permits", None)
         team = get_team_for_user(request.user)
 
         with transaction.atomic():
@@ -1582,21 +1768,28 @@ class TeamDriverRouteCreateView(APIView):
                 name=name,
                 description=data.get("description"),
             )
-            permit_data = {
-                "index": 1,
-                "name": "Permit 1",
-                "start_location": data["start_location"],
-                "start_latitude": data["start_latitude"],
-                "start_longitude": data["start_longitude"],
-                "end_location": data["end_location"],
-                "end_latitude": data["end_latitude"],
-                "end_longitude": data["end_longitude"],
-                "permit_file": data.get("permit_file"),
-                "permit_text": data.get("permit_text"),
-            }
-            if "waypoints" in data:
-                permit_data["waypoints"] = data["waypoints"]
-            _create_or_update_permit(route, permit_data)
+            if permits_data is not None:
+                for position, payload in enumerate(permits_data, start=1):
+                    permit_data = dict(payload)
+                    permit_data.setdefault("index", position)
+                    permit_data.setdefault("name", f"Permit {position}")
+                    _create_or_update_permit(route, permit_data)
+            else:
+                permit_data = {
+                    "index": 1,
+                    "name": "Permit 1",
+                    "start_location": data["start_location"],
+                    "start_latitude": data["start_latitude"],
+                    "start_longitude": data["start_longitude"],
+                    "end_location": data["end_location"],
+                    "end_latitude": data["end_latitude"],
+                    "end_longitude": data["end_longitude"],
+                    "permit_file": data.get("permit_file"),
+                    "permit_text": data.get("permit_text"),
+                }
+                if "waypoints" in data:
+                    permit_data["waypoints"] = data["waypoints"]
+                _create_or_update_permit(route, permit_data)
             _sync_route_waypoint_count(route)
 
         detail = AdminRouteHistoryDetailSerializer(route, context={"request": request}).data
@@ -1740,7 +1933,14 @@ class TeamRoutePermitListCreateView(APIView):
         serializer = TeamRoutePermitWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
-            permit = _create_or_update_permit(route, dict(serializer.validated_data))
+            permit_data = dict(serializer.validated_data)
+            next_index = (route.permits.order_by("index").last().index + 1) if route.permits.exists() else 1
+            requested_index = permit_data.get("index")
+            if requested_index is not None and requested_index != next_index:
+                raise ValidationError({"index": f"The next permit index must be {next_index}."})
+            permit_data["index"] = next_index
+            _validate_permit_against_neighbors(route, permit_data)
+            permit = _create_or_update_permit(route, permit_data)
         return Response(
             {
                 "success": True,
@@ -1778,7 +1978,9 @@ class TeamRoutePermitDetailView(APIView):
         serializer = TeamRoutePermitWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
-            permit = _create_or_update_permit(route, dict(serializer.validated_data), permit=permit)
+            permit_data = dict(serializer.validated_data)
+            _validate_permit_against_neighbors(route, permit_data, permit=permit)
+            permit = _create_or_update_permit(route, permit_data, permit=permit)
         return Response(
             {
                 "success": True,
@@ -1814,6 +2016,7 @@ class TeamRouteWaypointListCreateView(APIView):
     required_team_permission = "manage.route_history.team"
 
     def post(self, request, route_id, permit_id):
+        from django.db import transaction
         from route.models import RoutePermit, PermitWaypoint
         from route.serializers import WaypointSerializer
 
@@ -1827,9 +2030,20 @@ class TeamRouteWaypointListCreateView(APIView):
         serializer = TeamRouteWaypointWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
-        next_index = data.pop("index", None) or ((permit.waypoints.order_by("index").last().index + 1) if permit.waypoints.exists() else 1)
-        waypoint = PermitWaypoint.objects.create(permit=permit, route=route, index=next_index, **data)
-        _sync_route_waypoint_count(route)
+        count = permit.waypoints.count()
+        requested_index = data.pop("index", None)
+        insertion_index = requested_index if requested_index is not None else count + 1
+        if insertion_index < 1 or insertion_index > count + 1:
+            raise ValidationError({"index": f"Index must be between 1 and {count + 1}."})
+        with transaction.atomic():
+            _shift_waypoint_indexes_for_insert(permit, insertion_index)
+            waypoint = PermitWaypoint.objects.create(
+                permit=permit,
+                route=route,
+                index=insertion_index,
+                **data,
+            )
+            _sync_route_waypoint_count(route)
         return Response(
             {
                 "success": True,
@@ -1852,6 +2066,7 @@ class TeamRouteWaypointDetailView(APIView):
     required_team_permission = "manage.route_history.team"
 
     def patch(self, request, route_id, permit_id, waypoint_id):
+        from django.db import transaction
         from route.models import RoutePermit, PermitWaypoint
         from route.serializers import WaypointSerializer
 
@@ -1867,10 +2082,16 @@ class TeamRouteWaypointDetailView(APIView):
 
         serializer = TeamRouteWaypointWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        for field, value in serializer.validated_data.items():
-            setattr(waypoint, field, value)
-        waypoint.route = route
-        waypoint.save()
+        waypoint_data = dict(serializer.validated_data)
+        desired_index = waypoint_data.pop("index", None)
+        with transaction.atomic():
+            for field, value in waypoint_data.items():
+                setattr(waypoint, field, value)
+            waypoint.route = route
+            waypoint.save()
+            if desired_index is not None and desired_index != waypoint.index:
+                _move_waypoint_to_index(permit, waypoint, desired_index)
+                waypoint.refresh_from_db()
         return Response(
             {
                 "success": True,
@@ -1882,6 +2103,7 @@ class TeamRouteWaypointDetailView(APIView):
         )
 
     def delete(self, request, route_id, permit_id, waypoint_id):
+        from django.db import transaction
         from route.models import RoutePermit, PermitWaypoint
 
         route = _get_team_route_or_404(request, route_id)
@@ -1893,6 +2115,8 @@ class TeamRouteWaypointDetailView(APIView):
         waypoint = PermitWaypoint.objects.filter(id=waypoint_id, permit=permit).first()
         if not waypoint:
             return Response({"detail": "Waypoint not found."}, status=status.HTTP_404_NOT_FOUND)
-        waypoint.delete()
-        _sync_route_waypoint_count(route)
+        with transaction.atomic():
+            waypoint.delete()
+            _compact_waypoint_indexes(permit)
+            _sync_route_waypoint_count(route)
         return Response({"success": True, "message": "Waypoint deleted successfully."}, status=status.HTTP_200_OK)

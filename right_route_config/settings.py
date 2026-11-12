@@ -298,7 +298,9 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024
 
 
 FRONTEND_URL = os.getenv("FRONTEND_URL")
-SITE_URL = os.getenv("SITE_URL", "https://getrightroute.app")
+SITE_URL = "https://api.getrightroute.app"
+IOS_APP_STORE_URL = "https://getrightroute.app"
+GOOGLE_PLAY_STORE_URL = "https://getrightroute.app"
 GOOGLE_MAP_API_KEY = os.getenv("GOOGLE_MAP_API_KEY")
 
 
@@ -311,5 +313,6 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'webmaster@localhost')
 SERVER_EMAIL = os.getenv('SERVER_EMAIL', DEFAULT_FROM_EMAIL)
+SUPPORT_TICKET_RECIPIENT_EMAIL = "help@getrightroute.app"
 
 

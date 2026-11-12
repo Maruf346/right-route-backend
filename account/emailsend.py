@@ -93,27 +93,25 @@ def EmailOTPSend(otp_object):
         )
 
 
-def EmailInvitationLink(invite, accept_link, non_register_user):
-    email = invite.invited_to
+def EmailInvitationLink(invite, accept_link=None, non_register_user=None):
+    email = invite.invited_to.email
+    driver_name = (
+        invite.team_member_object.username
+        or invite.invited_to.email.split("@", 1)[0]
+    )
 
     subject = f"You've Been Invited to Join {invite.team.name} on RightRoute"
     context = {
         "team_name": invite.team.name,
-        "invited_email": invite.invited_to.email,
-        "accept_link": accept_link,
-        "expires_at": invite.expires_at.strftime("%d %b %Y %I:%M %p"),
+        "driver_name": driver_name,
         "logo_url": _get_logo_url(),
+        "ios_app_store_url": settings.IOS_APP_STORE_URL,
+        "google_play_store_url": settings.GOOGLE_PLAY_STORE_URL,
     }
-    if non_register_user:
-        html_message = render_to_string(
-            "mail_template/non_register_user_invite.html",
-            context,
-        )
-    else:
-        html_message = render_to_string(
-            "mail_template/user_invite_existing_user.html",
-            context,
-        )
+    html_message = render_to_string(
+        "team_dashboard/emails/driver_invitation.html",
+        context,
+    )
 
     connection, from_email = _get_email_connection_and_sender()
     email_message = EmailMessage(

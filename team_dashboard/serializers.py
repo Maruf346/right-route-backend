@@ -11,6 +11,7 @@ from team_dashboard.utils import (
     is_team_login_otp_expired,
     mask_email_address,
 )
+from route.service import normalize_state_code
 
 
 class TeamLoginRequestSerializer(serializers.Serializer):
@@ -35,7 +36,13 @@ class TeamLoginRequestSerializer(serializers.Serializer):
         if not user.is_active or user.status == UserStatus.BLOCKED:
             raise serializers.ValidationError("This account is inactive or blocked. Please contact support.")
 
-        # Verify team access
+        # Team Dashboard access is controlled by an active admin profile or
+        # team ownership. Do not fall back to ordinary driver membership here.
+        if not is_team_dashboard_user(user):
+            raise serializers.ValidationError(
+                "Your Team Dashboard access is locked or inactive. Please contact your team administrator."
+            )
+
         team = get_team_for_user(user)
         if not team:
             raise serializers.ValidationError(
@@ -59,6 +66,13 @@ class TeamVerifyOTPRequestSerializer(serializers.Serializer):
         user = User.objects.filter(email__iexact=email).first()
         if not user:
             raise serializers.ValidationError("User account not found.")
+
+        # Re-check access at OTP verification time in case an administrator
+        # was locked after requesting the code but before submitting it.
+        if not is_team_dashboard_user(user):
+            raise serializers.ValidationError(
+                "Your Team Dashboard access is locked or inactive. Please contact your team administrator."
+            )
 
         otp_obj = (
             OTPVerification.objects.filter(
@@ -442,6 +456,13 @@ class TeamUsersProcessResponseSerializer(serializers.Serializer):
     updated_count = serializers.IntegerField()
 
 
+class TeamUsersInviteFailureResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField(default=False)
+    detail = serializers.CharField()
+    added_count = serializers.IntegerField()
+    updated_count = serializers.IntegerField()
+
+
 class TeamUsersImportResponseSerializer(TeamUsersProcessResponseSerializer):
     errors = serializers.ListField(child=serializers.CharField())
 
@@ -474,7 +495,7 @@ class TeamPermissionTreeResponseSerializer(serializers.Serializer):
 
 class TeamRouteWaypointWriteSerializer(serializers.Serializer):
     id = serializers.IntegerField(required=False)
-    index = serializers.IntegerField(required=False)
+    index = serializers.IntegerField(required=False, min_value=1)
     name = serializers.CharField(required=True, max_length=255)
     waypoint_type = serializers.CharField(required=False, default="CHECKPOINT")
     latitude = serializers.FloatField(required=True)
@@ -486,8 +507,10 @@ class TeamRouteWaypointWriteSerializer(serializers.Serializer):
 
 class TeamRoutePermitWriteSerializer(serializers.Serializer):
     id = serializers.IntegerField(required=False)
-    index = serializers.IntegerField(required=False)
+    index = serializers.IntegerField(required=False, min_value=1)
     name = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    permit_number = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=100)
+    issuing_state = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=30)
     start_location = serializers.CharField(required=True, allow_blank=True, max_length=255)
     start_latitude = serializers.FloatField(required=True)
     start_longitude = serializers.FloatField(required=True)
@@ -497,6 +520,67 @@ class TeamRoutePermitWriteSerializer(serializers.Serializer):
     permit_file = serializers.FileField(required=False)
     permit_text = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     waypoints = TeamRouteWaypointWriteSerializer(many=True, required=False)
+
+    def validate_issuing_state(self, value):
+        if not value:
+            return None
+        state_code = normalize_state_code(value)
+        if not state_code:
+            raise serializers.ValidationError("Use a valid US state name or two-letter abbreviation.")
+        return state_code
+
+    def validate_waypoints(self, value):
+        indexes = [item.get("index") for item in value if item.get("index") is not None]
+        if len(indexes) != len(set(indexes)):
+            raise serializers.ValidationError("Waypoint indexes must be unique within a permit.")
+        return value
+
+
+def _validate_permit_chain(permits, route_data=None):
+    """Validate ordered permit boundaries before anything is written to the database."""
+    if not permits:
+        return permits
+
+    indexes = [item.get("index") for item in permits if item.get("index") is not None]
+    if len(indexes) != len(set(indexes)):
+        raise serializers.ValidationError({"permits": "Permit indexes must be unique."})
+    if indexes and sorted(indexes) != list(range(1, len(permits) + 1)):
+        raise serializers.ValidationError({"permits": "Permit indexes must be contiguous starting at 1."})
+
+    ordered = sorted(
+        enumerate(permits),
+        key=lambda entry: (entry[1].get("index") or entry[0] + 1),
+    )
+    tolerance = 0.0001
+    for position in range(1, len(ordered)):
+        previous = ordered[position - 1][1]
+        current = ordered[position][1]
+        lat_matches = abs(previous["end_latitude"] - current["start_latitude"]) <= tolerance
+        lng_matches = abs(previous["end_longitude"] - current["start_longitude"]) <= tolerance
+        if not (lat_matches and lng_matches):
+            current_index = current.get("index") or position + 1
+            previous_index = previous.get("index") or position
+            raise serializers.ValidationError({
+                "permits": (
+                    f"Permit {current_index} start coordinates must match "
+                    f"Permit {previous_index} end coordinates."
+                )
+            })
+
+    if route_data:
+        first = ordered[0][1]
+        last = ordered[-1][1]
+        pairs = (
+            (first["start_latitude"], route_data.get("start_latitude")),
+            (first["start_longitude"], route_data.get("start_longitude")),
+            (last["end_latitude"], route_data.get("end_latitude")),
+            (last["end_longitude"], route_data.get("end_longitude")),
+        )
+        if any(expected is not None and abs(actual - expected) > tolerance for actual, expected in pairs):
+            raise serializers.ValidationError({
+                "permits": "The first/last permit boundaries must match the route start/end coordinates."
+            })
+    return permits
 
 
 class TeamRouteCreateRequestSerializer(serializers.Serializer):
@@ -511,6 +595,19 @@ class TeamRouteCreateRequestSerializer(serializers.Serializer):
     permit_file = serializers.FileField(required=False)
     permit_text = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     waypoints = TeamRouteWaypointWriteSerializer(many=True, required=False)
+    permits = TeamRoutePermitWriteSerializer(many=True, required=False)
+
+    def validate(self, attrs):
+        permits = attrs.get("permits")
+        if permits is not None:
+            if not permits:
+                raise serializers.ValidationError({"permits": "At least one permit is required when permits is supplied."})
+            if attrs.get("permit_file") or attrs.get("permit_text") or attrs.get("waypoints"):
+                raise serializers.ValidationError(
+                    "Use either the nested permits payload or the legacy flat permit fields, not both."
+                )
+            _validate_permit_chain(permits, attrs)
+        return attrs
 
 
 class TeamRouteUpdateRequestSerializer(serializers.Serializer):
@@ -526,6 +623,56 @@ class TeamRouteMapUpdateRequestSerializer(TeamRouteUpdateRequestSerializer):
     permits = TeamRoutePermitWriteSerializer(many=True, required=False)
     delete_missing_permits = serializers.BooleanField(required=False, default=False)
     replace_waypoints = serializers.BooleanField(required=False, default=True)
+
+    def validate_permits(self, value):
+        return _validate_permit_chain(value)
+
+
+class TeamPermitParseRequestSerializer(serializers.Serializer):
+    file = serializers.FileField(required=False)
+    permit_text = serializers.CharField(required=False, allow_blank=False)
+    state_hint = serializers.CharField(required=False, allow_blank=False, max_length=30)
+
+    def validate_state_hint(self, value):
+        state_code = normalize_state_code(value)
+        if not state_code:
+            raise serializers.ValidationError("Use a valid US state name or two-letter abbreviation.")
+        return state_code
+
+    def validate_file(self, value):
+        extension = value.name.rsplit(".", 1)[-1].lower() if "." in value.name else ""
+        if extension not in {"pdf", "png", "jpg", "jpeg"}:
+            raise serializers.ValidationError("Supported permit files are PDF, PNG, JPG, and JPEG.")
+        if value.size > 20 * 1024 * 1024:
+            raise serializers.ValidationError("Permit files may not exceed 20 MB.")
+        return value
+
+    def validate(self, attrs):
+        supplied = int(bool(attrs.get("file"))) + int(bool(attrs.get("permit_text")))
+        if supplied != 1:
+            raise serializers.ValidationError("Provide exactly one of file or permit_text.")
+        return attrs
+
+
+class TeamPermitParsedLocationSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    latitude = serializers.FloatField()
+    longitude = serializers.FloatField()
+
+
+class TeamPermitParsedWaypointSerializer(TeamPermitParsedLocationSerializer):
+    index = serializers.IntegerField()
+    waypoint_type = serializers.CharField()
+
+
+class TeamPermitParseResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()
+    permit_number = serializers.CharField(allow_null=True, required=False)
+    issuing_state = serializers.CharField()
+    origin = TeamPermitParsedLocationSerializer(allow_null=True)
+    destination = TeamPermitParsedLocationSerializer(allow_null=True)
+    waypoints = TeamPermitParsedWaypointSerializer(many=True)
+    unresolved_waypoints = serializers.ListField(child=serializers.CharField())
 
 
 class TeamRouteMutationResponseSerializer(serializers.Serializer):

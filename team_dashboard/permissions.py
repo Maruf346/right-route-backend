@@ -9,10 +9,12 @@ def is_team_dashboard_user(user):
     if not (user and user.is_authenticated and user.is_active):
         return False
 
-    # Check if user has active TeamAdminProfile (sub-admin / assigned admin)
+    # An explicit TeamAdminProfile is authoritative. MAIN_USER accounts may
+    # also have an automatically-created personal team; never fall back to
+    # that team when an assigned admin profile exists but has been locked.
     profile = getattr(user, "team_admin_profile", None)
-    if profile and profile.is_active and profile.team.is_active:
-        return True
+    if profile:
+        return bool(profile.is_active and profile.team.is_active)
 
     # Check if user owns a team
     if hasattr(user, "owned_team") and user.owned_team.is_active:
@@ -28,11 +30,15 @@ def get_team_for_user(user):
     if not (user and user.is_authenticated):
         return None
 
-    # Prioritize explicit team admin profile if assigned
+    # An explicit admin assignment is authoritative. If it is inactive, the
+    # user has no Team Dashboard access and must not fall through to an
+    # auto-created owned team or ordinary driver membership.
     try:
         profile = getattr(user, "team_admin_profile", None)
-        if profile and profile.is_active and profile.team and profile.team.is_active:
-            return profile.team
+        if profile:
+            if profile.is_active and profile.team and profile.team.is_active:
+                return profile.team
+            return None
     except Exception:
         pass
 

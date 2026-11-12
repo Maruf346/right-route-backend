@@ -7,6 +7,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.shortcuts import get_object_or_404
 from django.http import FileResponse, Http404
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes
@@ -600,6 +601,9 @@ class CustomerSearchView(APIView):
                 "ticket_id": {"type": "integer"},
                 "ticket_number": {"type": "string"},
                 "status": {"type": "string"},
+                "customer_confirmation_sent": {"type": "boolean"},
+                "staff_notification_sent": {"type": "boolean"},
+                "staff_notification_email": {"type": "string"},
             },
         }
     },
@@ -621,6 +625,9 @@ class WebsiteTicketCreateView(APIView):
                 "ticket_id": ticket.id,
                 "ticket_number": ticket.ticket_number,
                 "status": ticket.get_status_display(),
+                "customer_confirmation_sent": getattr(ticket, "customer_confirmation_sent", False),
+                "staff_notification_sent": getattr(ticket, "staff_notification_sent", False),
+                "staff_notification_email": settings.SUPPORT_TICKET_RECIPIENT_EMAIL,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -735,6 +742,9 @@ class TeamTicketPrefillView(APIView):
                 "status": {"type": "string"},
                 "priority": {"type": "string"},
                 "created_at": {"type": "string"},
+                "customer_confirmation_sent": {"type": "boolean"},
+                "staff_notification_sent": {"type": "boolean"},
+                "staff_notification_email": {"type": "string"},
             },
         }
     },
@@ -763,6 +773,9 @@ class TeamSubmitTicketView(APIView):
                 "status": ticket.get_status_display(),
                 "priority": ticket.get_priority_display(),
                 "created_at": ticket.created_at.isoformat(),
+                "customer_confirmation_sent": getattr(ticket, "customer_confirmation_sent", False),
+                "staff_notification_sent": getattr(ticket, "staff_notification_sent", False),
+                "staff_notification_email": settings.SUPPORT_TICKET_RECIPIENT_EMAIL,
             },
             status=status.HTTP_201_CREATED,
         )

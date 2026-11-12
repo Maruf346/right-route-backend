@@ -57,9 +57,6 @@ SUPPORT_CONTACT_EMAILS = {
     "fleet_sales": "sales@getrightroute.app",
     "legal": "legal@getrightroute.app",
 }
-SUPPORT_NOTIFICATION_EMAIL = "help@getrightroute.app"
-
-
 class MainCategory(models.TextChoices):
     ACCOUNT_LOGIN = "ACCOUNT_LOGIN", "Account and Login Issues"
     BILLING_SUBSCRIPTION = "BILLING_SUBSCRIPTION", "Billing and Subscription Issues"

@@ -35,6 +35,7 @@ from team_dashboard.views import (
     TeamRoutePermitDetailView,
     TeamRouteWaypointListCreateView,
     TeamRouteWaypointDetailView,
+    TeamPermitParseView,
     # Manage — Plan
     TeamPlanView,
     # Utility
@@ -97,6 +98,7 @@ urlpatterns = [
     # 4. MANAGE — ROUTE HISTORY
     # -------------------------------------------------------------
     path("manage/route-history/", TeamRouteHistoryListView.as_view(), name="team-route-history-list"),
+    path("manage/permits/parse/", TeamPermitParseView.as_view(), name="team-permit-parse"),
     path("manage/team-users/<int:user_id>/routes/", TeamDriverRouteCreateView.as_view(), name="team-driver-route-create"),
     path("manage/route-history/bulk-delete/", TeamRouteHistoryBulkDeleteView.as_view(), name="team-route-history-bulk-delete"),
     path("manage/route-history/download/", TeamRouteHistoryDownloadCSVView.as_view(), name="team-route-history-download-csv"),

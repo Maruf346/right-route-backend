@@ -67,6 +67,22 @@ def generate_secure_password(length=12):
             return password
 
 
+def create_and_send_team_driver_invite(team, member):
+    """Create a pending in-app driver invitation and send its email."""
+    from account.emailsend import EmailInvitationLink
+    from account.models import TeamMemberInvite
+
+    invite = TeamMemberInvite.objects.create(
+        team=team,
+        team_member_object=member,
+        invited_to=member.user,
+        expires_at=timezone.now() + timedelta(days=1),
+    )
+    accept_link = f"{settings.FRONTEND_URL}/team/invite/{invite.uuid}/accept"
+    EmailInvitationLink(invite, accept_link, member.user.has_usable_password())
+    return invite
+
+
 def _get_email_connection_and_sender():
     """Return a Django mail connection and sender from EmailConfig or EMAIL_* settings."""
     config = EmailConfig.objects.filter(is_active=True).first()

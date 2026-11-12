@@ -4,7 +4,7 @@ from django.db import transaction
 from subscription.services.validators import RouteAccessValidator
 from rest_framework.exceptions import ValidationError
 from django.db.models import Max
-from .service import get_intersection_lat_lng, extract_route_data
+from .service import get_intersection_lat_lng, extract_route_data, normalize_state_code
 from account.models import TeamMember
 
 class RouteListSerializer(serializers.ModelSerializer):
@@ -29,7 +29,7 @@ class RoutePermitSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoutePermit
         fields = [
-            "id", "index", "name",
+            "id", "index", "name", "permit_number", "issuing_state",
             "start_location", "start_latitude", "start_longitude",
             "end_location", "end_latitude", "end_longitude",
             "permit_file", "permit_text", "extracted_text", "waypoints"
@@ -79,6 +79,7 @@ def _build_waypoint_objects(route_data, permit, route):
             intersections,
             start_coords=start_coords,
             end_coords=end_coords,
+            state_hint=permit.issuing_state,
         )
         if intersections
         else []
@@ -111,9 +112,16 @@ class RouteCreateSerializer(serializers.Serializer):
     end_longitude = serializers.FloatField()
     permit_file = serializers.FileField(required=False, allow_null=True)
     permit_text = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    permit_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    issuing_state = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     
     def validate(self, attrs):
         # Permit file and text are optional; drivers can manually set waypoints
+        if attrs.get("issuing_state"):
+            state_code = normalize_state_code(attrs["issuing_state"])
+            if not state_code:
+                raise serializers.ValidationError({"issuing_state": "Use a valid US state."})
+            attrs["issuing_state"] = state_code
         return attrs
     
     def create_permit(self, validated_data, route):
@@ -129,7 +137,11 @@ class RouteCreateSerializer(serializers.Serializer):
         permit_text = validated_data.get("permit_text", None)
         if not _has_permit_input(permit_file=permit_file, permit_text=permit_text):
             return []
-        route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
+        route_data = extract_route_data(
+            permit_file=permit_file,
+            permit_text=permit_text,
+            state_hint=permit.issuing_state,
+        )
         return _build_waypoint_objects(route_data, permit, route)
     
     def create(self, validated_data):
@@ -160,7 +172,7 @@ class PermitSerializers(serializers.ModelSerializer):
     class Meta:
         model = RoutePermit
         fields = [
-            "id", "index", "name",
+            "id", "index", "name", "permit_number", "issuing_state",
             "start_location", "start_latitude", "start_longitude", "end_location", "end_latitude", "end_longitude",
             "permit_file", "permit_text", "extracted_text", "waypoints"
         ]
@@ -176,6 +188,11 @@ class PermitSerializers(serializers.ModelSerializer):
     
     def validate(self, attrs):
         # Permit file or text are optional per client requirements
+        if attrs.get("issuing_state"):
+            state_code = normalize_state_code(attrs["issuing_state"])
+            if not state_code:
+                raise serializers.ValidationError({"issuing_state": "Use a valid US state."})
+            attrs["issuing_state"] = state_code
         return attrs
     
     def create(self, validated_data):
@@ -193,7 +210,11 @@ class PermitSerializers(serializers.ModelSerializer):
             permit = super().create(validated_data)
             if _has_permit_input(permit_file=permit_file, permit_text=permit_text):
                 try:
-                    route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
+                    route_data = extract_route_data(
+                        permit_file=permit_file,
+                        permit_text=permit_text,
+                        state_hint=permit.issuing_state,
+                    )
                 except Exception as e:
                     print(f"Error extracting route data for subsequent permit: {e}")
                     route_data = None
@@ -210,7 +231,11 @@ class PermitSerializers(serializers.ModelSerializer):
             if _has_permit_input(permit_file=permit_file, permit_text=permit_text):
                 instance.waypoints.all().delete()
                 try:
-                    route_data = extract_route_data(permit_file=permit_file, permit_text=permit_text)
+                    route_data = extract_route_data(
+                        permit_file=permit_file,
+                        permit_text=permit_text,
+                        state_hint=instance.issuing_state,
+                    )
                 except Exception as e:
                     print(f"Error extracting route data for permit update: {e}")
                     route_data = None
