@@ -33,7 +33,7 @@ class GooglePlaySubscriptionFlowTests(TestCase):
         response = self.client.get("/api/v1/subscription-plans/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        plans = response.data if isinstance(response.data, list) else response.data.get("results", response.data)
+        plans = response.data if isinstance(response.data, list) else (response.data.get("data") or response.data.get("results") or [])
         product_ids = {p["product_id"] for p in plans}
         expected = {
             "rr_individual_annual",

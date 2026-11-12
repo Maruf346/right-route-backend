@@ -133,7 +133,6 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
 .venv
 env/
 venv/
@@ -264,14 +263,6 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
-### VisualStudioCode ###
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-!.vscode/*.code-snippets
-
 # Local History for Visual Studio Code
 .history/
 
@@ -317,3 +308,8 @@ docs/
 production.env
 .deploy.env
 staticfiles/
+config.bat
+node_modules
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
