@@ -13,6 +13,7 @@ from core.constants import PlanType, UserSubscriptionStatus, UserType
 from subscription.models import PurchaseInfo, SubscriptionPlan, UserSubscription
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
 class GooglePlaySubscriptionFlowTests(TestCase):
     def setUp(self):
         self.client = APIClient()
