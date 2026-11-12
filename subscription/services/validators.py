@@ -25,12 +25,15 @@ class SubscriptionValidator:
         )
     
     @classmethod
-    def validate_purchase(cls, user):
-        mySubscription = UserSubscription.objects.filter(user=user)
-        if cls.has_valid_subscription(mySubscription).exists():
-            raise ValidationError({
-                "detail": f"You already have an active subscription."
-            })
+    def validate_purchase(cls, user, plan=None):
+        mySubscription = cls.has_valid_subscription(
+            UserSubscription.objects.select_related("plan").filter(user=user)
+        ).order_by("-created_at").first()
+        if mySubscription:
+            if plan is None or mySubscription.plan_id == plan.id:
+                raise ValidationError({
+                    "detail": "You are already subscribed to this plan."
+                })
 
         # User belongs to any team
         membership = (

@@ -14,6 +14,7 @@ class SubscriptionPlan(BaseModel):
     team_limit = models.PositiveIntegerField(default=0)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=10, default="USD")
+    trial_days = models.PositiveIntegerField(default=7)
     features_json = models.JSONField(default=dict, blank=True, null=True)
     is_active = models.BooleanField(default=True)
     

@@ -378,10 +378,13 @@ class CurrentUserSerializer(serializers.ModelSerializer):
                 return "TEAM_MEMBER"
 
         # 2. Check User Active Subscription
+        from subscription.services.validators import SubscriptionValidator
         subscription = (
-            UserSubscription.objects
-            .filter(user=user)
-            .select_related("plan")
+            SubscriptionValidator.has_valid_subscription(
+                UserSubscription.objects
+                .filter(user=user)
+                .select_related("plan")
+            )
             .order_by("-created_at")
             .first()
         )

@@ -1,13 +1,19 @@
+import base64
+import json
+import logging
+
 from django.shortcuts import render
 from core.permissions import IsAdminUserPermission
 from core.permissions import HasAdminDashboardPermission
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from core.viewsets import OwnModelViewSet, OwnReadOnlyModelViewSet
-from .models import SubscriptionPlan, UserSubscription
+from .models import PurchaseInfo, SubscriptionPlan, UserSubscription
 from .serializers import *
 from .filters import SubscriptionPlanFilterSet
 from rest_framework.decorators import action
+from subscription.services.google_play import GooglePlayBillingService
 from subscription.services.purchase_service import SubscriptionPurchaseService
+from account.models import Team
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework import viewsets
@@ -20,6 +26,8 @@ from django.db import transaction
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from notification.utils import log_activity
 from subscription.services.purchase_verify import create_or_update_purchase_info
+
+logger = logging.getLogger(__name__)
 
 
 @extend_schema(tags=["Subscription Plans - Admin"])
@@ -169,6 +177,161 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
             status=status.HTTP_201_CREATED
         )
     
+    def _ensure_purchase_ownership(self, *, user, transaction_id, purchase_token):
+        if transaction_id:
+            existing_tx = (
+                PurchaseInfo.objects.filter(transaction_id=transaction_id)
+                .exclude(user=user)
+                .first()
+            )
+            if existing_tx:
+                raise ValidationError({"transaction_id": "This purchase is already linked to another account."})
+
+        if purchase_token:
+            existing_token = (
+                PurchaseInfo.objects.filter(purchase_token=purchase_token)
+                .exclude(user=user)
+                .first()
+            )
+            if existing_token:
+                raise ValidationError({"purchase_token": "This Google Play purchase is already linked to another account."})
+
+    def _activate_verified_subscription(
+        self,
+        *,
+        user,
+        subscription,
+        platform,
+        product_id,
+        transaction_id,
+        original_transaction_id=None,
+        purchase_token=None,
+        receipt_data=None,
+        package_name=None,
+        order_id=None,
+        amount=None,
+        currency="USD",
+        purchase_time=None,
+        expiry_time=None,
+        auto_renew=False,
+        raw_response=None,
+    ):
+        self._ensure_purchase_ownership(
+            user=user,
+            transaction_id=transaction_id,
+            purchase_token=purchase_token,
+        )
+
+        verification_status = PURCHASE_VERIFY_STATUS.VERIFIED
+        sub_status = UserSubscriptionStatus.ACTIVE
+        merged_raw = dict(raw_response or {})
+
+        if platform == PURCHASE_PLATFORM.ANDROID:
+            verified_data = GooglePlayBillingService.verify_purchase(
+                product_id=product_id,
+                purchase_token=purchase_token or "",
+                transaction_id=transaction_id,
+                package_name=package_name,
+                trial_days=getattr(subscription.plan, "trial_days", 7),
+                fallback_expiry=expiry_time or subscription.expires_at,
+                developer_payload=f"user:{user.id}|sub:{subscription.uuid}",
+            )
+            verification_status = verified_data["verification_status"]
+            sub_status = verified_data["subscription_status"]
+            purchase_time = verified_data["purchase_time"]
+            expiry_time = verified_data["expiry_time"]
+            auto_renew = verified_data["auto_renew"]
+            order_id = verified_data.get("order_id") or order_id
+            package_name = verified_data.get("package_name") or package_name
+            merged_raw = {**merged_raw, **verified_data.get("raw_response", {})}
+
+        purchase_time = purchase_time or timezone.now()
+        expiry_time = expiry_time or subscription.expires_at
+        amount = amount if amount is not None else subscription.plan.price
+        currency = currency or subscription.plan.currency or "USD"
+        original_transaction_id = original_transaction_id or transaction_id
+        now = timezone.now()
+
+        with transaction.atomic():
+            # Supersede any prior active/trial/grace subscriptions on upgrade/downgrade/restore
+            UserSubscription.objects.filter(
+                user=user,
+                status__in=[
+                    UserSubscriptionStatus.ACTIVE,
+                    UserSubscriptionStatus.TRIAL,
+                    UserSubscriptionStatus.GRACE_PERIOD,
+                ],
+            ).exclude(id=subscription.id).update(
+                status=UserSubscriptionStatus.CANCELLED,
+                cancelled_at=now,
+                auto_renew=False,
+            )
+
+            # Avoid UNIQUE constraint collision when re-verifying or restoring the same transaction_id
+            if transaction_id:
+                UserSubscription.objects.filter(
+                    user=user,
+                    latest_transaction_id=transaction_id,
+                ).exclude(id=subscription.id).update(latest_transaction_id=None)
+
+            team = subscription.team
+            if subscription.plan.plan_type == PlanType.TEAM:
+                team = getattr(user, "owned_team", None) or team
+                if not team:
+                    team_prefix = (user.email or f"user-{user.id}").split("@")[0]
+                    team, _ = Team.objects.get_or_create(
+                        owner=user,
+                        defaults={
+                            "name": f"{team_prefix}'s Team",
+                            "max_members": subscription.plan.team_limit or 0,
+                        },
+                    )
+                if subscription.plan.team_limit:
+                    team.max_members = subscription.plan.team_limit
+                    team.save(update_fields=["max_members"])
+
+            subscription.team = team
+            subscription.status = sub_status
+            subscription.payment_status = PaymentStatus.PAID
+            subscription.auto_renew = auto_renew
+            subscription.last_renew_at = purchase_time
+            subscription.expires_at = expiry_time
+            subscription.original_transaction_id = original_transaction_id
+            subscription.latest_transaction_id = transaction_id
+            subscription.save(update_fields=[
+                "team",
+                "status",
+                "payment_status",
+                "auto_renew",
+                "last_renew_at",
+                "expires_at",
+                "original_transaction_id",
+                "latest_transaction_id",
+                "updated_at",
+            ])
+
+            purchase_info, _ = create_or_update_purchase_info(
+                user=user,
+                subscription=subscription,
+                platform=platform,
+                product_id=product_id,
+                transaction_id=transaction_id,
+                original_transaction_id=original_transaction_id,
+                purchase_token=purchase_token,
+                receipt_data=receipt_data,
+                package_name=package_name,
+                order_id=order_id,
+                amount=amount,
+                currency=currency,
+                purchase_time=purchase_time,
+                expiry_time=expiry_time,
+                auto_renew=auto_renew,
+                verification_status=verification_status,
+                raw_response=merged_raw,
+            )
+
+        return subscription, purchase_info
+
     @extend_schema(
         operation_id="subscription_purchase_verify",
         summary="Record app-store purchase and activate subscription",
@@ -182,7 +345,7 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
         data = serializer.validated_data
         user = request.user
 
-        subscription = UserSubscription.objects.select_related("plan").filter(
+        subscription = UserSubscription.objects.select_related("plan", "team").filter(
             uuid=data.get("subscription_plan_uuid"),
             user=user,
         ).first()
@@ -193,56 +356,24 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
         if subscription.plan.product_id and subscription.plan.product_id != product_id:
             raise ValidationError({"product_id": "Product ID does not match this subscription plan."})
 
-        purchase_time = data.get("purchase_time") or timezone.now()
-        expiry_time = data.get("expiry_time") or subscription.expires_at
-        amount = data.get("amount") if data.get("amount") is not None else subscription.plan.price
-        currency = data.get("currency") or subscription.plan.currency or "USD"
-        original_transaction_id = data.get("original_transaction_id") or data["transaction_id"]
-
-        with transaction.atomic():
-            subscription.status = UserSubscriptionStatus.ACTIVE
-            subscription.payment_status = PaymentStatus.PAID
-            subscription.auto_renew = data.get("auto_renew", False)
-            subscription.last_renew_at = purchase_time
-            subscription.expires_at = expiry_time
-            subscription.original_transaction_id = original_transaction_id
-            subscription.latest_transaction_id = data["transaction_id"]
-            subscription.save(update_fields=[
-                "status",
-                "payment_status",
-                "auto_renew",
-                "last_renew_at",
-                "expires_at",
-                "original_transaction_id",
-                "latest_transaction_id",
-                "updated_at",
-            ])
-
-            if subscription.plan.plan_type == PlanType.TEAM and subscription.plan.team_limit:
-                team = getattr(user, "owned_team", None) or subscription.team
-                if team:
-                    team.max_members = subscription.plan.team_limit
-                    team.save(update_fields=["max_members"])
-
-            purchase_info, _ = create_or_update_purchase_info(
-                user=user,
-                subscription=subscription,
-                platform=data["platform"],
-                product_id=product_id,
-                transaction_id=data["transaction_id"],
-                original_transaction_id=original_transaction_id,
-                purchase_token=data.get("purchase_token"),
-                receipt_data=data.get("receipt_data"),
-                package_name=data.get("package_name"),
-                order_id=data.get("order_id"),
-                amount=amount,
-                currency=currency,
-                purchase_time=purchase_time,
-                expiry_time=expiry_time,
-                auto_renew=data.get("auto_renew", False),
-                verification_status=PURCHASE_VERIFY_STATUS.VERIFIED,
-                raw_response=data.get("raw_response") or {},
-            )
+        subscription, purchase_info = self._activate_verified_subscription(
+            user=user,
+            subscription=subscription,
+            platform=data["platform"],
+            product_id=product_id,
+            transaction_id=data["transaction_id"],
+            original_transaction_id=data.get("original_transaction_id"),
+            purchase_token=data.get("purchase_token"),
+            receipt_data=data.get("receipt_data"),
+            package_name=data.get("package_name"),
+            order_id=data.get("order_id"),
+            amount=data.get("amount"),
+            currency=data.get("currency", "USD"),
+            purchase_time=data.get("purchase_time"),
+            expiry_time=data.get("expiry_time"),
+            auto_renew=data.get("auto_renew", False),
+            raw_response=data.get("raw_response"),
+        )
 
         return Response(
             {
@@ -256,6 +387,181 @@ class UserSubscriptionViewSet(OwnReadOnlyModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @extend_schema(
+        operation_id="subscription_restore",
+        summary="Restore active Google Play or App Store purchases",
+        request=RestorePurchasesSerializer,
+        responses={200: RestorePurchasesResponseSerializer},
+    )
+    @action(detail=False, methods=["post"], url_path="restore")
+    def restore(self, request, *args, **kwargs):
+        serializer = RestorePurchasesSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        platform = serializer.validated_data["platform"]
+        purchases = serializer.validated_data.get("purchases") or []
+        user = request.user
+
+        restored_sub = None
+        last_error = None
+
+        for item in purchases:
+            product_id = item["product_id"]
+            plan = SubscriptionPlan.objects.filter(product_id=product_id, is_active=True).first()
+            if not plan:
+                continue
+
+            tx_id = (
+                item.get("transaction_id")
+                or item.get("order_id")
+                or (f"gp_restore_{(item.get('purchase_token') or '')[:32]}")
+            )
+            purchase_token = item.get("purchase_token")
+            if platform == PURCHASE_PLATFORM.ANDROID and not purchase_token:
+                continue
+
+            # Re-use existing subscription for the same purchase_token/tx if this user already holds it
+            existing_pi = (
+                PurchaseInfo.objects.select_related("subscription", "subscription__plan", "subscription__team")
+                .filter(user=user)
+                .filter(
+                    Q(purchase_token=purchase_token) if purchase_token else Q(transaction_id=tx_id)
+                )
+                .order_by("-created_at")
+                .first()
+            )
+            target_sub = existing_pi.subscription if (existing_pi and existing_pi.subscription and existing_pi.subscription.plan_id == plan.id) else None
+
+            if not target_sub:
+                now = timezone.now()
+                team = getattr(user, "owned_team", None) if plan.plan_type == PlanType.TEAM else None
+                target_sub = UserSubscription.objects.create(
+                    user=user,
+                    team=team,
+                    plan=plan,
+                    status=UserSubscriptionStatus.PENDING,
+                    starts_at=now,
+                    last_renew_at=now,
+                    expires_at=now + SubscriptionPurchaseService.get_plan_duration(plan),
+                    payment_status=PaymentStatus.PENDING,
+                )
+
+            try:
+                restored_sub, _ = self._activate_verified_subscription(
+                    user=user,
+                    subscription=target_sub,
+                    platform=platform,
+                    product_id=product_id,
+                    transaction_id=tx_id,
+                    original_transaction_id=item.get("original_transaction_id") or tx_id,
+                    purchase_token=purchase_token,
+                    receipt_data=item.get("receipt_data"),
+                    package_name=item.get("package_name"),
+                    order_id=item.get("order_id"),
+                    purchase_time=item.get("purchase_time"),
+                    expiry_time=item.get("expiry_time"),
+                    auto_renew=item.get("auto_renew", True),
+                    raw_response=item.get("raw_response"),
+                )
+                break
+            except ValidationError as exc:
+                last_error = exc
+                if target_sub.status == UserSubscriptionStatus.PENDING:
+                    target_sub.delete()
+                continue
+
+        if not restored_sub:
+            restored_sub = self.get_active_subscription(user)
+
+        if not restored_sub:
+            return Response(
+                {
+                    "success": True,
+                    "restored": False,
+                    "message": "No active subscription found to restore." if not last_error else "Unable to restore subscription.",
+                    "data": None,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {
+                "success": True,
+                "restored": True,
+                "message": "Subscription restored successfully.",
+                "data": UserSubscriptionSerializer(restored_sub).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        operation_id="subscription_google_play_rtdn",
+        summary="Receive Google Play Real-Time Developer Notifications (Pub/Sub webhook)",
+        request=GooglePlayRTDNSerializer,
+    )
+    @action(detail=False, methods=["post"], url_path="google-play-rtdn", permission_classes=[AllowAny])
+    def google_play_rtdn(self, request, *args, **kwargs):
+        message = (request.data or {}).get("message") or {}
+        raw_b64 = message.get("data")
+        if not raw_b64:
+            return Response({"status": "ignored"}, status=status.HTTP_200_OK)
+
+        try:
+            decoded = json.loads(base64.b64decode(raw_b64).decode("utf-8"))
+        except Exception:
+            return Response({"status": "invalid_payload"}, status=status.HTTP_400_BAD_REQUEST)
+
+        sub_notif = decoded.get("subscriptionNotification") or {}
+        purchase_token = sub_notif.get("purchaseToken")
+        notif_type = sub_notif.get("notificationType")
+        package_name = decoded.get("packageName") or GooglePlayBillingService.get_package_name()
+
+        if not purchase_token:
+            return Response({"status": "no_token"}, status=status.HTTP_200_OK)
+
+        purchase_info = (
+            PurchaseInfo.objects.select_related("subscription", "subscription__plan", "user")
+            .filter(purchase_token=purchase_token)
+            .order_by("-created_at")
+            .first()
+        )
+        if not purchase_info or not purchase_info.subscription:
+            logger.info("RTDN received for unknown purchase_token (type=%s)", notif_type)
+            return Response({"status": "unknown_token"}, status=status.HTTP_200_OK)
+
+        sub = purchase_info.subscription
+        # Revoked / Expired notifications immediately revoke access if Play API unavailable or confirms
+        if notif_type in (12, 13):  # REVOKED=12, EXPIRED=13
+            sub.status = UserSubscriptionStatus.EXPIRED
+            sub.auto_renew = False
+            sub.save(update_fields=["status", "auto_renew", "updated_at"])
+            return Response({"status": "expired"}, status=status.HTTP_200_OK)
+
+        if notif_type == 3:  # SUBSCRIPTION_CANCELED
+            sub.auto_renew = False
+            sub.cancelled_at = timezone.now()
+            sub.save(update_fields=["auto_renew", "cancelled_at", "updated_at"])
+
+        if GooglePlayBillingService.has_credentials():
+            try:
+                verified = GooglePlayBillingService.verify_purchase(
+                    product_id=purchase_info.product_id or sub.plan.product_id,
+                    purchase_token=purchase_token,
+                    package_name=package_name,
+                    trial_days=getattr(sub.plan, "trial_days", 7),
+                    fallback_expiry=sub.expires_at,
+                )
+                sub.status = verified["subscription_status"]
+                sub.expires_at = verified["expiry_time"]
+                sub.auto_renew = verified["auto_renew"]
+                sub.last_renew_at = timezone.now()
+                sub.save(update_fields=["status", "expires_at", "auto_renew", "last_renew_at", "updated_at"])
+            except ValidationError:
+                sub.status = UserSubscriptionStatus.EXPIRED
+                sub.auto_renew = False
+                sub.save(update_fields=["status", "auto_renew", "updated_at"])
+
+        return Response({"status": "processed"}, status=status.HTTP_200_OK)
 
 
 class AdminSubscriberBaseViewSet(viewsets.GenericViewSet):

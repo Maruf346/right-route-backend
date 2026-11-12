@@ -8,7 +8,7 @@ from .models import SubscriptionPlan, UserSubscription
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubscriptionPlan
-        fields = ("id", "name", "product_id", "plan_type", "billing_type", "team_limit", "price", "currency", "features_json", "is_active", "created_at", "updated_at", )
+        fields = ("id", "name", "product_id", "plan_type", "billing_type", "team_limit", "price", "currency", "trial_days", "features_json", "is_active", "created_at", "updated_at", )
         read_only_fields = ("id", "created_at", "updated_at")
 
 
@@ -19,6 +19,7 @@ class UserSubscriptionSerializer(serializers.ModelSerializer):
     plan_product_id = serializers.CharField(source="plan.product_id", read_only=True)
     plan_price = serializers.DecimalField( source="plan.price", max_digits=10, decimal_places=2, read_only=True)
     team_limit = serializers.IntegerField(source="plan.team_limit",read_only=True)
+    trial_days = serializers.IntegerField(source="plan.trial_days", read_only=True)
     
     # Team Details
     team_name = serializers.CharField(source="team.name",read_only=True)
@@ -264,3 +265,34 @@ class VerifyPurchaseResponseSerializer(serializers.Serializer):
     transaction_id = serializers.CharField()
     verification_status = serializers.CharField()
     data = UserSubscriptionSerializer()
+
+
+class RestorePurchaseItemSerializer(serializers.Serializer):
+    product_id = serializers.CharField(required=True, max_length=100)
+    transaction_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    original_transaction_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    purchase_token = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    receipt_data = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    package_name = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    order_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    purchase_time = serializers.DateTimeField(required=False, allow_null=True)
+    expiry_time = serializers.DateTimeField(required=False, allow_null=True)
+    auto_renew = serializers.BooleanField(required=False, default=True)
+    raw_response = serializers.JSONField(required=False, default=dict)
+
+
+class RestorePurchasesSerializer(serializers.Serializer):
+    platform = serializers.ChoiceField(choices=PURCHASE_PLATFORM.choices, default=PURCHASE_PLATFORM.ANDROID)
+    purchases = RestorePurchaseItemSerializer(many=True, required=False, default=list)
+
+
+class RestorePurchasesResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    restored = serializers.BooleanField()
+    message = serializers.CharField()
+    data = UserSubscriptionSerializer(allow_null=True)
+
+
+class GooglePlayRTDNSerializer(serializers.Serializer):
+    message = serializers.DictField(required=False)
+    subscription = serializers.CharField(required=False, allow_blank=True)
