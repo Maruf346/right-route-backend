@@ -6,7 +6,11 @@ from account.models import User, OTPVerification, Team
 from core.constants import OTPPurpose, UserStatus
 from team_dashboard.constants import TeamDashboardRole, TEAM_DASHBOARD_PERMISSIONS
 from team_dashboard.permissions import is_team_dashboard_user, get_team_for_user, get_user_team_permissions
-from team_dashboard.utils import generate_and_send_team_otp, mask_email_address
+from team_dashboard.utils import (
+    generate_and_send_team_otp,
+    is_team_login_otp_expired,
+    mask_email_address,
+)
 
 
 class TeamLoginRequestSerializer(serializers.Serializer):
@@ -70,7 +74,7 @@ class TeamVerifyOTPRequestSerializer(serializers.Serializer):
         if not otp_obj:
             raise serializers.ValidationError("Invalid verification code.")
 
-        if otp_obj.is_expired:
+        if is_team_login_otp_expired(otp_obj):
             raise serializers.ValidationError("Verification code has expired. Please request a new code.")
 
         # Mark OTP verified
@@ -146,6 +150,7 @@ class TeamLoginOTPResponseSerializer(serializers.Serializer):
     email = serializers.EmailField()
     masked_email = serializers.CharField()
     next_step = serializers.CharField(default="OTP_VERIFY")
+    expires_in_seconds = serializers.IntegerField(default=900)
 
 
 class TeamLoginUserSerializer(serializers.Serializer):

@@ -3,10 +3,13 @@ import random
 import string
 import secrets
 from datetime import timedelta
+from email.message import MIMEPart
+from pathlib import Path
 
 from django.db import transaction
 from django.core.mail import EmailMessage, get_connection
 from django.conf import settings
+from django.template.loader import render_to_string
 from django.utils import timezone
 from core.models import EmailConfig
 from account.models import OTPVerification, User
@@ -14,7 +17,15 @@ from core.constants import OTPPurpose
 
 logger = logging.getLogger(__name__)
 
+TEAM_LOGIN_OTP_EXPIRY_MINUTES = 15
 TEAM_MANAGE_OTP_EXPIRY_MINUTES = 10
+
+
+def is_team_login_otp_expired(otp_object):
+    """Return whether a Team Dashboard login OTP has expired."""
+    return timezone.now() >= (
+        otp_object.created_at + timedelta(minutes=TEAM_LOGIN_OTP_EXPIRY_MINUTES)
+    )
 
 
 def is_team_manage_otp_expired(otp_object):
@@ -97,18 +108,16 @@ def send_team_login_otp_email(user, otp_code):
     Sends 6-digit MFA verification code to user's email for Team Dashboard login.
     """
     subject = f"RightRoute Team Dashboard Verification Code: {otp_code}"
-    body_html = f"""
-    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #ea580c;">RightRoute Team Dashboard</h2>
-        <p>Hello,</p>
-        <p>Your 6-digit verification code to log in to the Team Dashboard is:</p>
-        <div style="background-color: #fff7ed; border: 2px dashed #ea580c; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0;">
-            <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #c2410c;">{otp_code}</span>
-        </div>
-        <p>This code will expire in 5 minutes. If you did not request this code, please contact support at <a href="mailto:brad@getrightroute.app">brad@getrightroute.app</a>.</p>
-        <p>Best regards,<br><strong>RightRoute Team</strong></p>
-    </div>
-    """
+    logo_path = Path(settings.BASE_DIR) / "static" / "logo.png"
+    body_html = render_to_string(
+        "team_dashboard/emails/login_verification.html",
+        {
+            "otp_code": otp_code,
+            "expiry_minutes": TEAM_LOGIN_OTP_EXPIRY_MINUTES,
+            "has_logo": logo_path.exists(),
+            "support_email": "brad@getrightroute.app",
+        },
+    )
 
     try:
         conn, from_sender = _get_email_connection_and_sender()
@@ -120,6 +129,19 @@ def send_team_login_otp_email(user, otp_code):
             connection=conn,
         )
         msg.content_subtype = "html"
+        if logo_path.exists():
+            with logo_path.open("rb") as logo_file:
+                logo_content = logo_file.read()
+            logo = MIMEPart()
+            logo.set_content(
+                logo_content,
+                maintype="image",
+                subtype="png",
+                disposition="inline",
+                cid="<right-route-logo>",
+                filename="right-route-logo.png",
+            )
+            msg.attach(logo)
         msg.send(fail_silently=False)
         return True
     except Exception as e:

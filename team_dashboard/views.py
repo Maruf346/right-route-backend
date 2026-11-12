@@ -104,6 +104,7 @@ class TeamLoginView(APIView):
                 "email": user.email,
                 "masked_email": masked_email,
                 "next_step": "OTP_VERIFY",
+                "expires_in_seconds": 900,
             },
             status=status.HTTP_200_OK,
         )
@@ -193,6 +194,7 @@ class TeamResendOTPView(APIView):
                 "email": user.email,
                 "masked_email": masked_email,
                 "next_step": "OTP_VERIFY",
+                "expires_in_seconds": 900,
             },
             status=status.HTTP_200_OK,
         )
