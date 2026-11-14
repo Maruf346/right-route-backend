@@ -22,6 +22,7 @@ from team_dashboard.views import (
     TeamUsersImportCSVView,
     TeamUsersDownloadCSVView,
     TeamUsersBulkRemoveView,
+    TeamUsersSendInviteView,
     TeamUserDetailView,
     # Manage — Route History
     TeamRouteHistoryListView,
@@ -92,6 +93,7 @@ urlpatterns = [
     path("manage/team-users/import/", TeamUsersImportCSVView.as_view(), name="team-users-import-csv"),
     path("manage/team-users/download/", TeamUsersDownloadCSVView.as_view(), name="team-users-download-csv"),
     path("manage/team-users/remove/", TeamUsersBulkRemoveView.as_view(), name="team-users-bulk-remove"),
+    path("manage/team-users/send-invite/", TeamUsersSendInviteView.as_view(), name="team-users-send-invite"),
     path("manage/team-users/<int:member_id>/", TeamUserDetailView.as_view(), name="team-user-detail"),
 
     # -------------------------------------------------------------

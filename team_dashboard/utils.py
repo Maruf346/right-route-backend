@@ -2,11 +2,13 @@ import logging
 import random
 import string
 import secrets
+import uuid
 from datetime import timedelta
 from email.message import MIMEPart
 from pathlib import Path
 
 from django.db import transaction
+from django.core import signing
 from django.core.mail import EmailMessage, get_connection
 from django.conf import settings
 from django.template.loader import render_to_string
@@ -19,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 TEAM_LOGIN_OTP_EXPIRY_MINUTES = 15
 TEAM_MANAGE_OTP_EXPIRY_MINUTES = 10
+TEAM_INVITE_SIGNING_SALT = "right-route.team-driver-invite"
+TEAM_INVITE_EXPIRY_DAYS = 1
 
 
 def is_team_login_otp_expired(otp_object):
@@ -76,11 +80,180 @@ def create_and_send_team_driver_invite(team, member):
         team=team,
         team_member_object=member,
         invited_to=member.user,
-        expires_at=timezone.now() + timedelta(days=1),
+        expires_at=timezone.now() + timedelta(days=TEAM_INVITE_EXPIRY_DAYS),
+        queued_at=timezone.now(),
     )
-    accept_link = f"{settings.FRONTEND_URL}/team/invite/{invite.uuid}/accept"
+    accept_link = build_team_invite_enrollment_link(invite)
     EmailInvitationLink(invite, accept_link, member.user.has_usable_password())
+    invite.delivery_status = TeamMemberInvite.DeliveryStatus.SENT
+    invite.invite_sent_at = timezone.now()
+    invite.last_delivery_attempt_at = invite.invite_sent_at
+    invite.delivery_attempt_count = 1
+    invite.save(update_fields=[
+        "delivery_status",
+        "invite_sent_at",
+        "last_delivery_attempt_at",
+        "delivery_attempt_count",
+        "updated_at",
+    ])
     return invite
+
+
+def build_team_invite_token(invite):
+    """Return a timestamp-signed opaque token without exposing the invite UUID directly."""
+    return signing.dumps(
+        {"invite_id": str(invite.uuid)},
+        salt=TEAM_INVITE_SIGNING_SALT,
+        compress=True,
+    )
+
+
+def build_team_invite_enrollment_link(invite):
+    token = build_team_invite_token(invite)
+    frontend_url = (settings.FRONTEND_URL or "").rstrip("/")
+    return f"{frontend_url}/team/invite/{token}/accept"
+
+
+def resolve_team_invite_token(token):
+    """Resolve a signed invite token, retaining UUID compatibility for older clients."""
+    try:
+        payload = signing.loads(
+            token,
+            salt=TEAM_INVITE_SIGNING_SALT,
+            max_age=timedelta(days=TEAM_INVITE_EXPIRY_DAYS),
+        )
+        return payload["invite_id"]
+    except signing.SignatureExpired:
+        raise
+    except (signing.BadSignature, KeyError, TypeError):
+        try:
+            return str(uuid.UUID(str(token)))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise signing.BadSignature("Invalid invitation token.") from exc
+
+
+def queue_team_driver_invitation(team, member):
+    """Durably enqueue one invitation and return (invite, newly_queued)."""
+    from account.models import TeamMember, TeamMemberInvite
+    from core.constants import TeamMemberInviteStatus
+
+    now = timezone.now()
+    with transaction.atomic():
+        # Serialize concurrent clicks for this member even when no invite row
+        # exists yet (select_for_update on an empty invite query locks nothing).
+        TeamMember.objects.select_for_update().get(pk=member.pk, team=team)
+        existing = (
+            TeamMemberInvite.objects.select_for_update()
+            .filter(
+                team=team,
+                team_member_object=member,
+                invited_to=member.user,
+                status=TeamMemberInviteStatus.PENDING,
+                expires_at__gt=now,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if existing and existing.delivery_status in {
+            TeamMemberInvite.DeliveryStatus.QUEUED,
+            TeamMemberInvite.DeliveryStatus.SENDING,
+            TeamMemberInvite.DeliveryStatus.SENT,
+        }:
+            return existing, False
+
+        if existing:
+            existing.delivery_status = TeamMemberInvite.DeliveryStatus.QUEUED
+            existing.queued_at = now
+            existing.delivery_failure_detail = ""
+            existing.save(update_fields=[
+                "delivery_status",
+                "queued_at",
+                "delivery_failure_detail",
+                "updated_at",
+            ])
+            return existing, True
+
+        invite = TeamMemberInvite.objects.create(
+            team=team,
+            team_member_object=member,
+            invited_to=member.user,
+            expires_at=now + timedelta(days=TEAM_INVITE_EXPIRY_DAYS),
+            queued_at=now,
+            delivery_status=TeamMemberInvite.DeliveryStatus.QUEUED,
+        )
+        return invite, True
+
+
+def process_next_team_driver_invitation():
+    """Claim and deliver one queued invitation. Returns False when the queue is empty."""
+    from account.emailsend import EmailInvitationLink
+    from account.models import TeamMemberInvite
+    from core.constants import TeamMemberInviteStatus
+
+    now = timezone.now()
+    TeamMemberInvite.objects.filter(
+        delivery_status=TeamMemberInvite.DeliveryStatus.QUEUED,
+        expires_at__lte=now,
+    ).update(
+        status=TeamMemberInviteStatus.EXPIRED,
+        delivery_status=TeamMemberInvite.DeliveryStatus.FAILED,
+        delivery_failure_detail="Invitation expired before delivery.",
+        updated_at=now,
+    )
+    TeamMemberInvite.objects.filter(
+        delivery_status=TeamMemberInvite.DeliveryStatus.SENDING,
+        last_delivery_attempt_at__lt=now - timedelta(minutes=15),
+    ).update(
+        delivery_status=TeamMemberInvite.DeliveryStatus.QUEUED,
+        delivery_failure_detail="Previous delivery worker stopped before completion; requeued.",
+        queued_at=now,
+        updated_at=now,
+    )
+    with transaction.atomic():
+        invite = (
+            TeamMemberInvite.objects.select_for_update()
+            .select_related("team", "team_member_object", "invited_to")
+            .filter(
+                delivery_status=TeamMemberInvite.DeliveryStatus.QUEUED,
+                expires_at__gt=now,
+            )
+            .order_by("queued_at", "created_at")
+            .first()
+        )
+        if not invite:
+            return False
+        invite.delivery_status = TeamMemberInvite.DeliveryStatus.SENDING
+        invite.last_delivery_attempt_at = now
+        invite.delivery_attempt_count += 1
+        invite.save(update_fields=[
+            "delivery_status",
+            "last_delivery_attempt_at",
+            "delivery_attempt_count",
+            "updated_at",
+        ])
+
+    try:
+        EmailInvitationLink(
+            invite,
+            build_team_invite_enrollment_link(invite),
+            invite.invited_to.has_usable_password(),
+        )
+    except Exception as exc:
+        logger.exception("Invitation delivery failed for invite %s", invite.pk)
+        TeamMemberInvite.objects.filter(pk=invite.pk).update(
+            delivery_status=TeamMemberInvite.DeliveryStatus.FAILED,
+            delivery_failure_detail=str(exc)[:2000],
+            updated_at=timezone.now(),
+        )
+        return True
+
+    TeamMemberInvite.objects.filter(pk=invite.pk).update(
+        delivery_status=TeamMemberInvite.DeliveryStatus.SENT,
+        invite_sent_at=timezone.now(),
+        delivery_failure_detail="",
+        updated_at=timezone.now(),
+    )
+    return True
 
 
 def _get_email_connection_and_sender():

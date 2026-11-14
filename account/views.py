@@ -561,6 +561,15 @@ class AcceptTeamMemberInvitation(APIView):
     permission_classes = [IsAuthenticated]
     
     def validate_invitation(self, invitation_uuid) -> TeamMemberInvite:
+        from django.core import signing
+        from team_dashboard.utils import resolve_team_invite_token
+
+        try:
+            invitation_uuid = resolve_team_invite_token(invitation_uuid)
+        except signing.SignatureExpired as exc:
+            raise ValidationError("Invitation has expired.") from exc
+        except signing.BadSignature as exc:
+            raise ValidationError("Invalid invitation token.") from exc
         try:
             invitation = (
                 TeamMemberInvite.objects
@@ -612,10 +621,9 @@ class AcceptTeamMemberInvitation(APIView):
             )
         
         action_status = action.strip().upper()
-        invitation = self.validate_invitation(invitation_uuid)
-        team_member_object = invitation.team_member_object
-        
         with transaction.atomic():
+            invitation = self.validate_invitation(invitation_uuid)
+            team_member_object = invitation.team_member_object
             if (
                 action_status == TeamMemberInviteStatus.ACCEPT
                 and TeamMember.objects.filter(

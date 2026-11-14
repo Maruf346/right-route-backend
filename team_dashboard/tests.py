@@ -8,11 +8,12 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 from rest_framework.exceptions import ValidationError
 
-from account.models import OTPVerification, Team, TeamMember, User
+from account.models import OTPVerification, Team, TeamMember, TeamMemberInvite, User
 from account.emailsend import EmailInvitationLink
 from core.constants import OTPPurpose, UserType
 from team_dashboard.constants import TeamDashboardRole
 from team_dashboard.models import TeamAdminProfile
+from team_dashboard.utils import build_team_invite_token, process_next_team_driver_invitation
 from team_dashboard.serializers import (
     TeamLoginRequestSerializer,
     TeamVerifyOTPRequestSerializer,
@@ -36,7 +37,7 @@ class TeamDriverInvitationEmailTests(TestCase):
             team_member_object=SimpleNamespace(username="Jane Driver"),
         )
 
-        self.assertTrue(EmailInvitationLink(invite))
+        self.assertTrue(EmailInvitationLink(invite, "https://team.example.com/enroll/signed-token"))
 
         message = mail.outbox[0]
         self.assertIn("Hello Jane Driver,", message.body)
@@ -51,6 +52,7 @@ class TeamDriverInvitationEmailTests(TestCase):
         )
         self.assertIn('src="cid:app-store-badge"', message.body)
         self.assertIn('src="cid:google-play-badge"', message.body)
+        self.assertIn('href="https://team.example.com/enroll/signed-token"', message.body)
         self.assertEqual(
             {attachment.get_filename() for attachment in message.attachments},
             {"app-store.svg", "google-play.svg"},
@@ -312,10 +314,12 @@ class TeamUserManagementTests(TestCase):
             user_type=UserType.MAIN_USER,
         )
         self.team = self.owner.owned_team
+        self.team.max_members = 100
+        self.team.save(update_fields=["max_members"])
         self.client = APIClient()
         self.client.force_authenticate(self.owner)
 
-    def _member(self, email, status):
+    def _member(self, email, status, name=None):
         user = User.objects.create_user(
             email=email,
             password="DriverPass123!",
@@ -324,7 +328,7 @@ class TeamUserManagementTests(TestCase):
         return TeamMember.objects.create(
             team=self.team,
             user=user,
-            username=email.split("@", 1)[0],
+            username=name or email.split("@", 1)[0],
             status=status,
         )
 
@@ -346,8 +350,24 @@ class TeamUserManagementTests(TestCase):
             ["pending@example.com"],
         )
 
-    @patch("team_dashboard.views.create_and_send_team_driver_invite")
-    def test_csv_import_supports_bom_and_first_last_name_headers(self, mocked_invite):
+    def test_first_name_ordering_is_applied_before_pagination(self):
+        self._member("zoe@example.com", False, "Zoe Zebra")
+        self._member("amy@example.com", False, "Amy Able")
+        self._member("mike@example.com", False, "Mike Middle")
+
+        first_page = self.client.get(
+            reverse("team-users-list"),
+            {"ordering": "first_name", "page": 1, "page_size": 2},
+        )
+        second_page = self.client.get(
+            reverse("team-users-list"),
+            {"ordering": "first_name", "page": 2, "page_size": 2},
+        )
+
+        self.assertEqual([item["name"] for item in first_page.data["results"]], ["Amy Able", "Mike Middle"])
+        self.assertEqual([item["name"] for item in second_page.data["results"]], ["Zoe Zebra"])
+
+    def test_csv_import_supports_bom_and_first_last_name_headers(self):
         content = "\ufeffFirst Name,Last Name,Email\r\nJane,Doe,JANE@example.com\r\n"
         upload = SimpleUploadedFile(
             "drivers.csv",
@@ -365,10 +385,9 @@ class TeamUserManagementTests(TestCase):
         self.assertEqual(response.data["added_count"], 1)
         member = TeamMember.objects.get(team=self.team, user__email="jane@example.com")
         self.assertEqual(member.username, "Jane Doe")
-        mocked_invite.assert_called_once()
+        self.assertFalse(TeamMemberInvite.objects.filter(team=self.team).exists())
 
-    @patch("team_dashboard.views.create_and_send_team_driver_invite")
-    def test_manual_add_sends_invite(self, mocked_invite):
+    def test_manual_batch_add_does_not_send_invite(self):
         response = self.client.post(
             reverse("team-users-list"),
             {"users": [{"name": "New Driver", "email": "new-driver@example.com"}]},
@@ -377,17 +396,180 @@ class TeamUserManagementTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["added_count"], 1)
-        mocked_invite.assert_called_once()
+        self.assertFalse(TeamMemberInvite.objects.filter(team=self.team).exists())
 
-    @patch("team_dashboard.views.create_and_send_team_driver_invite")
-    def test_smtp_failure_rolls_back_new_member_for_retry(self, mocked_invite):
-        mocked_invite.side_effect = RuntimeError("SMTP unavailable")
+    def test_csv_sized_batch_add_creates_every_valid_row_atomically(self):
+        users = [
+            {"name": f"Driver {index:02d}", "email": f"driver-{index:02d}@example.com"}
+            for index in range(25)
+        ]
+
+        response = self.client.post(reverse("team-users-list"), {"users": users}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["added_count"], 25)
+        self.assertEqual(TeamMember.objects.filter(team=self.team).count(), 25)
+        self.assertFalse(TeamMemberInvite.objects.filter(team=self.team).exists())
+
+    def test_batch_add_rejects_duplicate_email_without_partial_writes(self):
+        self._member("existing@example.com", False)
         response = self.client.post(
             reverse("team-users-list"),
-            {"users": [{"name": "Retry Driver", "email": "retry@example.com"}]},
+            {
+                "users": [
+                    {"name": "New Driver", "email": "new@example.com"},
+                    {"name": "Existing Driver", "email": "existing@example.com"},
+                ]
+            },
             format="json",
         )
 
-        self.assertEqual(response.status_code, 502, response.data)
-        self.assertFalse(TeamMember.objects.filter(team=self.team, user__email="retry@example.com").exists())
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertFalse(TeamMember.objects.filter(team=self.team, user__email="new@example.com").exists())
+
+    def test_batch_add_enforces_plan_capacity(self):
+        self.team.max_members = 1
+        self.team.save(update_fields=["max_members"])
+        self._member("existing@example.com", False)
+
+        response = self.client.post(
+            reverse("team-users-list"),
+            {"users": [{"name": "Over Limit", "email": "over@example.com"}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409, response.data)
+
+    def test_send_invite_is_owner_only_and_idempotent(self):
+        first = self._member("first@example.com", False, "First Driver")
+        second = self._member("second@example.com", False, "Second Driver")
+        url = reverse("team-users-send-invite")
+
+        first_response = self.client.post(url, {"member_ids": [first.id, second.id]}, format="json")
+        repeated_response = self.client.post(url, {"member_ids": [first.id, second.id]}, format="json")
+
+        self.assertEqual(first_response.status_code, 200, first_response.data)
+        self.assertEqual(first_response.data["queued_count"], 2)
+        self.assertEqual(repeated_response.status_code, 200, repeated_response.data)
+        self.assertEqual(repeated_response.data["queued_count"], 0)
+        self.assertEqual(repeated_response.data["idempotent_count"], 2)
+        self.assertEqual(TeamMemberInvite.objects.filter(team=self.team).count(), 2)
+
+    def test_signed_invitation_token_can_be_accepted(self):
+        member = self._member("signed-invite@example.com", False, "Signed Driver")
+        queue_response = self.client.post(
+            reverse("team-users-send-invite"),
+            {"member_ids": [member.id]},
+            format="json",
+        )
+        self.assertEqual(queue_response.status_code, 200, queue_response.data)
+        invite = TeamMemberInvite.objects.get(team_member_object=member)
+        token = build_team_invite_token(invite)
+        self.assertNotIn(str(invite.uuid), token)
+
+        self.client.force_authenticate(member.user)
+        accept_response = self.client.post(
+            reverse("invitation-action"),
+            {"invitation_uuid": token, "action": "ACCEPT"},
+            format="json",
+        )
+
+        self.assertEqual(accept_response.status_code, 200, accept_response.data)
+        member.refresh_from_db()
+        self.assertTrue(member.status)
+
+    def test_send_invite_rejects_foreign_member_id(self):
+        other_owner = User.objects.create_user(
+            email="other-owner@example.com",
+            password="OwnerPass123!",
+            user_type=UserType.MAIN_USER,
+        )
+        other_team = other_owner.owned_team
+        foreign_user = User.objects.create_user(
+            email="foreign-driver@example.com",
+            password="DriverPass123!",
+            user_type=UserType.MAIN_USER,
+        )
+        foreign_member = TeamMember.objects.create(
+            team=other_team,
+            user=foreign_user,
+            username="Foreign Driver",
+            status=False,
+        )
+
+        response = self.client.post(
+            reverse("team-users-send-invite"),
+            {"member_ids": [foreign_member.id]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403, response.data)
+
+    def test_send_invite_rejects_non_owner_with_manage_permission(self):
+        member = self._member("pending-owner-only@example.com", False)
+        admin = User.objects.create_user(
+            email="team-admin@example.com",
+            password="AdminPass123!",
+            user_type=UserType.MAIN_USER,
+        )
+        TeamAdminProfile.objects.create(
+            user=admin,
+            team=self.team,
+            role=TeamDashboardRole.ADMIN,
+            permissions_json=["manage.team_users"],
+            is_active=True,
+        )
+        self.client.force_authenticate(admin)
+
+        response = self.client.post(
+            reverse("team-users-send-invite"),
+            {"member_ids": [member.id]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403, response.data)
+
+    def test_edit_rejects_duplicate_email_without_partially_changing_name(self):
+        member = self._member("editable@example.com", False, "Original Name")
+        self._member("taken@example.com", False, "Taken Name")
+
+        response = self.client.patch(
+            reverse("team-user-detail", kwargs={"member_id": member.id}),
+            {"name": "Changed Name", "email": "taken@example.com"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        member.refresh_from_db()
+        self.assertEqual(member.username, "Original Name")
+
+    @patch("account.emailsend.EmailInvitationLink")
+    def test_invitation_worker_records_partial_provider_failure(self, mocked_send):
+        failed_member = self._member("failed@example.com", False)
+        sent_member = self._member("sent@example.com", False)
+        queue_response = self.client.post(
+            reverse("team-users-send-invite"),
+            {"member_ids": [failed_member.id, sent_member.id]},
+            format="json",
+        )
+        self.assertEqual(queue_response.status_code, 200, queue_response.data)
+        mocked_send.side_effect = [RuntimeError("provider unavailable"), True]
+
+        self.assertTrue(process_next_team_driver_invitation())
+        self.assertTrue(process_next_team_driver_invitation())
+
+        failed_invite = TeamMemberInvite.objects.get(team_member_object=failed_member)
+        sent_invite = TeamMemberInvite.objects.get(team_member_object=sent_member)
+        self.assertEqual(failed_invite.delivery_status, TeamMemberInvite.DeliveryStatus.FAILED)
+        self.assertIn("provider unavailable", failed_invite.delivery_failure_detail)
+        self.assertEqual(sent_invite.delivery_status, TeamMemberInvite.DeliveryStatus.SENT)
+        self.assertIsNotNone(sent_invite.invite_sent_at)
+
+    def test_download_uses_required_filename(self):
+        response = self.client.get(reverse("team-users-download-csv"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Disposition"],
+            'attachment; filename="team_users_export.csv"',
+        )
 

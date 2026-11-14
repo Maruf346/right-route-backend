@@ -25,4 +25,17 @@ services:
       - .env
 
     restart: always
-  
+
+  invite-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python manage.py process_team_invites --loop
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - backend
+    restart: always
+

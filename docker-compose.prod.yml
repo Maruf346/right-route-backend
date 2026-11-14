@@ -44,5 +44,16 @@ services:
       - /var/www/certbot:/var/www/certbot:ro
     restart: unless-stopped
 
+  invite-worker:
+    image: ${IMAGE_URI:?IMAGE_URI is required}
+    container_name: right_route_invite_worker
+    command: python manage.py process_team_invites --loop
+    env_file:
+      - production.env
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   staticfiles:

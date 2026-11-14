@@ -340,6 +340,15 @@ class TeamMemberBatchAddSerializer(serializers.Serializer):
         help_text="List of users to add: [{'name': 'John Doe', 'email': 'john@example.com'}]",
     )
 
+    def validate_users(self, value):
+        normalized = [item["email"].strip().casefold() for item in value]
+        duplicates = sorted({email for email in normalized if normalized.count(email) > 1})
+        if duplicates:
+            raise serializers.ValidationError(
+                f"Duplicate emails in request: {', '.join(duplicates)}"
+            )
+        return value
+
 
 class TeamMemberUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(required=False, max_length=255)
@@ -353,6 +362,15 @@ class TeamMemberBulkRemoveSerializer(serializers.Serializer):
         min_length=1,
         help_text="List of TeamMember IDs to remove from the team",
     )
+
+    def validate_member_ids(self, value):
+        if len(value) != len(set(value)):
+            raise serializers.ValidationError("Member IDs must be unique.")
+        return value
+
+
+class TeamMemberBulkInviteSerializer(TeamMemberBulkRemoveSerializer):
+    pass
 
 
 class TeamUsersStatsSerializer(serializers.Serializer):
@@ -461,6 +479,14 @@ class TeamUsersInviteFailureResponseSerializer(serializers.Serializer):
     detail = serializers.CharField()
     added_count = serializers.IntegerField()
     updated_count = serializers.IntegerField()
+
+
+class TeamUsersInviteSummarySerializer(serializers.Serializer):
+    message = serializers.CharField()
+    queued_count = serializers.IntegerField()
+    failed_count = serializers.IntegerField()
+    failures = serializers.ListField(child=serializers.DictField())
+    idempotent_count = serializers.IntegerField(required=False)
 
 
 class TeamUsersImportResponseSerializer(TeamUsersProcessResponseSerializer):

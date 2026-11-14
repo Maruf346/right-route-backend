@@ -9,8 +9,9 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiTypes
-from django.db import transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Q
+from django.db.models.functions import Lower
 
 from team_dashboard.permissions import (
     IsTeamDashboardUser,
@@ -21,10 +22,10 @@ from team_dashboard.permissions import (
     is_team_super_admin,
 )
 from team_dashboard.utils import (
-    create_and_send_team_driver_invite,
     generate_and_send_team_otp,
     is_team_manage_otp_expired,
     mask_email_address,
+    queue_team_driver_invitation,
 )
 from team_dashboard.serializers import (
     # Auth
@@ -51,6 +52,7 @@ from team_dashboard.serializers import (
     TeamMemberBatchAddSerializer,
     TeamMemberUpdateSerializer,
     TeamMemberBulkRemoveSerializer,
+    TeamMemberBulkInviteSerializer,
     TeamUsersStatsSerializer,
     # Manage — Route History
     RouteHistoryItemSerializer,
@@ -71,6 +73,7 @@ from team_dashboard.serializers import (
     TeamUsersListResponseSerializer,
     TeamUsersProcessResponseSerializer,
     TeamUsersInviteFailureResponseSerializer,
+    TeamUsersInviteSummarySerializer,
     TeamUsersImportResponseSerializer,
     TeamUsersImportCSVRequestSerializer,
     TeamAdminGeneratePasswordResponseSerializer,
@@ -831,8 +834,8 @@ def _team_member_values_from_csv_row(row):
     return name, email
 
 
-def _upsert_team_member_and_send_invite(team, name, email):
-    """Use one reliable creation path for manual and CSV-added drivers."""
+def _create_or_update_team_member(team, name, email):
+    """Create or update a driver without implicitly sending an invitation."""
     from account.models import TeamMember, User
     from core.constants import UserType
     from team_dashboard.utils import generate_secure_password
@@ -853,11 +856,7 @@ def _upsert_team_member_and_send_invite(team, name, email):
             user=user_obj,
             defaults={"username": name, "status": False},
         )
-        if created:
-            # SMTP failures roll back the member and invitation so retrying the
-            # same request can send a fresh, valid invitation.
-            create_and_send_team_driver_invite(team, member_obj)
-        else:
+        if not created:
             member_obj.username = name
             member_obj.save(update_fields=["username", "updated_at"])
         return member_obj, created
@@ -879,20 +878,41 @@ class TeamUsersListView(APIView):
             OpenApiParameter("enrolled", OpenApiTypes.STR, enum=["yes", "no"], description="Filter enrolled status."),
             OpenApiParameter("page", OpenApiTypes.INT, description="Page number."),
             OpenApiParameter("page_size", OpenApiTypes.INT, description="Page size."),
+            OpenApiParameter("ordering", OpenApiTypes.STR, enum=["first_name"], description="Sort alphabetically by first name before pagination."),
         ],
         responses={200: TeamUsersListResponseSerializer},
     )
     def get(self, request):
         team = get_team_for_user(request.user)
         if not team:
-            return Response({"members": [], "plan_stats": {}}, status=status.HTTP_200_OK)
+            return Response(
+                {
+                    "success": True,
+                    "results": [],
+                    "pagination": {
+                        "current_page": 1,
+                        "total_pages": 0,
+                        "total_count": 0,
+                        "has_next": False,
+                        "has_previous": False,
+                    },
+                    "plan_stats": {
+                        "max_members": 0,
+                        "total_in_list": 0,
+                        "enrolled_count": 0,
+                        "not_enrolled_count": 0,
+                        "slots_remaining": 0,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
 
         from account.models import TeamMember
         from django.db.models import Q
         from team_dashboard.serializers import TeamMemberItemSerializer, TeamUsersStatsSerializer
         from django.core.paginator import Paginator
 
-        members_qs = TeamMember.objects.filter(team=team).select_related("user").order_by("-created_at")
+        members_qs = TeamMember.objects.filter(team=team).select_related("user")
 
         # Search filter
         search = request.query_params.get("search") or request.query_params.get("q")
@@ -909,6 +929,17 @@ class TeamUsersListView(APIView):
             members_qs = members_qs.filter(status=True)
         elif enrolled == "no":
             members_qs = members_qs.filter(status=False)
+
+        ordering = (request.query_params.get("ordering") or "").strip()
+        if ordering and ordering != "first_name":
+            return Response(
+                {"detail": "Supported ordering value is 'first_name'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if ordering == "first_name":
+            members_qs = members_qs.order_by(Lower("username"), Lower("user__email"), "id")
+        else:
+            members_qs = members_qs.order_by("-created_at", "id")
 
         total_in_list = members_qs.count()
         all_team_members = TeamMember.objects.filter(team=team)
@@ -928,8 +959,13 @@ class TeamUsersListView(APIView):
         }
 
         # Pagination (default 10 per page as in PDF)
-        page_number = request.query_params.get("page", 1)
-        page_size = request.query_params.get("page_size", 10)
+        try:
+            page_number = max(1, int(request.query_params.get("page", 1)))
+            page_size = int(request.query_params.get("page_size", 10))
+        except (TypeError, ValueError):
+            return Response({"detail": "page and page_size must be integers."}, status=status.HTTP_400_BAD_REQUEST)
+        if not 1 <= page_size <= 1000:
+            return Response({"detail": "page_size must be between 1 and 1000."}, status=status.HTTP_400_BAD_REQUEST)
         paginator = Paginator(members_qs, page_size)
         page_obj = paginator.get_page(page_number)
 
@@ -954,7 +990,7 @@ class TeamUsersListView(APIView):
         request=TeamMemberBatchAddSerializer,
         responses={
             200: TeamUsersProcessResponseSerializer,
-            502: TeamUsersInviteFailureResponseSerializer,
+            409: OpenApiResponse(description="Plan capacity exceeded or a concurrent duplicate was added."),
         },
     )
     def post(self, request):
@@ -970,38 +1006,73 @@ class TeamUsersListView(APIView):
         serializer.is_valid(raise_exception=True)
 
         users_data = serializer.validated_data["users"]
-        current_count = TeamMember.objects.filter(team=team).count()
-        max_members = team.max_members or 0
+        normalized_rows = [
+            {"name": item["name"].strip(), "email": item["email"].strip().lower()}
+            for item in users_data
+        ]
+        empty_names = [index + 1 for index, item in enumerate(normalized_rows) if not item["name"]]
+        if empty_names:
+            return Response(
+                {"detail": "Name cannot be blank.", "rows": empty_names},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        added_count = 0
-        updated_count = 0
+        emails = [item["email"] for item in normalized_rows]
+        email_query = Q()
+        for email in emails:
+            email_query |= Q(user__email__iexact=email)
+        duplicates = list(
+            TeamMember.objects.filter(email_query, team=team)
+            .values_list("user__email", flat=True)
+        )
+        if duplicates:
+            return Response(
+                {"detail": "One or more emails are already on this team.", "duplicate_emails": sorted(duplicates)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        for item in users_data:
-            name = item["name"].strip()
-            email = item["email"].strip().lower()
-
-            try:
-                _member_obj, created = _upsert_team_member_and_send_invite(team, name, email)
-            except Exception:
-                logger.exception("Unable to create or invite team driver %s", email)
-                return Response(
-                    {
-                        "success": False,
-                        "detail": "The driver could not be added because the invitation email failed. Please retry.",
-                        "added_count": added_count,
-                        "updated_count": updated_count,
-                    },
-                    status=status.HTTP_502_BAD_GATEWAY,
+        from subscription.services.validators import TeamMemberValidator
+        max_members = TeamMemberValidator.sync_team_max_members(team)
+        try:
+            with transaction.atomic():
+                team.__class__.objects.select_for_update().get(pk=team.pk)
+                current_count = TeamMember.objects.filter(team=team).count()
+                if current_count + len(normalized_rows) > max_members:
+                    return Response(
+                        {
+                            "detail": "Adding these users would exceed the team plan capacity.",
+                            "max_members": max_members,
+                            "current_count": current_count,
+                            "requested_count": len(normalized_rows),
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                concurrent_duplicates = list(
+                    TeamMember.objects.filter(email_query, team=team)
+                    .values_list("user__email", flat=True)
                 )
-            added_count += int(created)
-            updated_count += int(not created)
+                if concurrent_duplicates:
+                    return Response(
+                        {
+                            "detail": "One or more emails are already on this team.",
+                            "duplicate_emails": sorted(concurrent_duplicates),
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                for item in normalized_rows:
+                    _create_or_update_team_member(team, item["name"], item["email"])
+        except IntegrityError:
+            return Response(
+                {"detail": "A user with one of these emails was added concurrently. Refresh and retry."},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         return Response(
             {
                 "success": True,
-                "message": f"Successfully processed {len(users_data)} users ({added_count} added, {updated_count} updated).",
-                "added_count": added_count,
-                "updated_count": updated_count,
+                "message": f"Successfully added {len(normalized_rows)} users.",
+                "added_count": len(normalized_rows),
+                "updated_count": 0,
             },
             status=status.HTTP_200_OK,
         )
@@ -1049,10 +1120,10 @@ class TeamUsersImportCSVView(APIView):
             name = name or email.split("@")[0]
 
             try:
-                _member_obj, created = _upsert_team_member_and_send_invite(team, name, email)
+                _member_obj, created = _create_or_update_team_member(team, name, email)
             except Exception:
-                logger.exception("Unable to import or invite team driver on CSV row %s", row_idx)
-                errors.append(f"Row {row_idx}: Invitation email failed; the user was not added.")
+                logger.exception("Unable to import team driver on CSV row %s", row_idx)
+                errors.append(f"Row {row_idx}: The user could not be added.")
                 continue
             added += int(created)
             updated += int(not created)
@@ -1072,7 +1143,7 @@ class TeamUsersImportCSVView(APIView):
 @extend_schema(
     tags=["Team Dashboard - Manage Team Users"],
     summary="Download Team Users as CSV",
-    description="Returns text/csv attachment with Content-Disposition filename=team_users.csv.",
+    description="Returns all team users as a text/csv attachment.",
     responses={200: OpenApiResponse(response=OpenApiTypes.BINARY, description="CSV file download (text/csv).")},
 )
 class TeamUsersDownloadCSVView(APIView):
@@ -1085,10 +1156,14 @@ class TeamUsersDownloadCSVView(APIView):
         team = get_team_for_user(request.user)
         from account.models import TeamMember
 
-        members = TeamMember.objects.filter(team=team).select_related("user").order_by("username")
+        members = (
+            TeamMember.objects.filter(team=team)
+            .select_related("user")
+            .order_by(Lower("username"), Lower("user__email"), "id")
+        )
 
         response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = 'attachment; filename="team_users.csv"'
+        response["Content-Disposition"] = 'attachment; filename="team_users_export.csv"'
 
         writer = csv.writer(response)
         writer.writerow(["Name", "Email", "Enrolled", "Joined Date"])
@@ -1121,13 +1196,113 @@ class TeamUsersBulkRemoveView(APIView):
         member_ids = serializer.validated_data["member_ids"]
         from account.models import TeamMember
 
-        deleted_count, _ = TeamMember.objects.filter(id__in=member_ids, team=team).delete()
+        members = TeamMember.objects.filter(id__in=member_ids, team=team)
+        if members.count() != len(member_ids):
+            return Response(
+                {"detail": "One or more team members were not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        deleted_count, _ = members.delete()
 
         return Response(
             {
                 "success": True,
                 "message": f"Successfully removed {deleted_count} team members.",
                 "removed_count": deleted_count,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(
+    tags=["Team Dashboard - Manage Team Users"],
+    summary="Queue invitations for selected team members",
+    description="Owner-only, durable, idempotent invitation queueing for selected unenrolled drivers.",
+    request=TeamMemberBulkInviteSerializer,
+    responses={
+        200: TeamUsersInviteSummarySerializer,
+        400: OpenApiResponse(description="Invalid or incomplete member ID list."),
+        403: OpenApiResponse(description="The requester is not the owner or a member belongs to another team."),
+        404: OpenApiResponse(description="No matching members exist."),
+        409: OpenApiResponse(description="A selected member is already enrolled."),
+        503: OpenApiResponse(description="The durable invitation queue is unavailable."),
+    },
+)
+class TeamUsersSendInviteView(APIView):
+    permission_classes = [IsAuthenticated, IsTeamDashboardUser, HasTeamDashboardPermission]
+    required_team_permission = "manage.team_users"
+
+    def post(self, request):
+        team = get_team_for_user(request.user)
+        if not team:
+            return Response({"detail": "Team not found."}, status=status.HTTP_404_NOT_FOUND)
+        if team.owner_id != request.user.id:
+            return Response(
+                {"detail": "Only the team owner can send driver invitations."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = TeamMemberBulkInviteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        member_ids = serializer.validated_data["member_ids"]
+
+        from account.models import TeamMember
+
+        found_members = list(
+            TeamMember.objects.filter(id__in=member_ids)
+            .select_related("team", "user")
+            .order_by("id")
+        )
+        if not found_members:
+            return Response({"detail": "No matching team members found."}, status=status.HTTP_404_NOT_FOUND)
+
+        foreign_ids = [member.id for member in found_members if member.team_id != team.id]
+        if foreign_ids:
+            return Response(
+                {"detail": "One or more selected members do not belong to your team."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        found_ids = {member.id for member in found_members}
+        missing_ids = [member_id for member_id in member_ids if member_id not in found_ids]
+        if missing_ids:
+            return Response(
+                {"detail": "One or more member IDs do not exist.", "missing_member_ids": missing_ids},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        enrolled_ids = [member.id for member in found_members if member.status]
+        if enrolled_ids:
+            return Response(
+                {"detail": "Enrolled members cannot be invited again.", "member_ids": enrolled_ids},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        queued_count = 0
+        idempotent_count = 0
+        try:
+            with transaction.atomic():
+                for member in found_members:
+                    _invite, newly_queued = queue_team_driver_invitation(team, member)
+                    queued_count += int(newly_queued)
+                    idempotent_count += int(not newly_queued)
+        except DatabaseError:
+            logger.exception("The team invitation queue is unavailable for team %s", team.pk)
+            return Response(
+                {"detail": "The invitation queue is temporarily unavailable. Please retry."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        message = f"{queued_count} invitation{'s' if queued_count != 1 else ''} queued"
+        if idempotent_count:
+            message += f"; {idempotent_count} already pending"
+        return Response(
+            {
+                "message": message,
+                "queued_count": queued_count,
+                "failed_count": 0,
+                "failures": [],
+                "idempotent_count": idempotent_count,
             },
             status=status.HTTP_200_OK,
         )
@@ -1159,16 +1334,19 @@ class TeamUserDetailView(APIView):
         name = serializer.validated_data.get("name")
         email = serializer.validated_data.get("email")
 
-        if name is not None:
-            member.username = name
-            member.save(update_fields=["username"])
-
-        if email is not None and email.lower() != member.user.email.lower():
-            email = email.lower()
-            if User.objects.filter(email__iexact=email).exclude(id=member.user.id).exists():
+        normalized_email = email.lower() if email is not None else None
+        if normalized_email is not None and normalized_email != member.user.email.lower():
+            from account.models import User
+            if User.objects.filter(email__iexact=normalized_email).exclude(id=member.user.id).exists():
                 return Response({"detail": "This email address is already in use."}, status=status.HTTP_400_BAD_REQUEST)
-            member.user.email = email
-            member.user.save(update_fields=["email", "updated_at"])
+
+        with transaction.atomic():
+            if name is not None:
+                member.username = name.strip()
+                member.save(update_fields=["username", "updated_at"])
+            if normalized_email is not None and normalized_email != member.user.email.lower():
+                member.user.email = normalized_email
+                member.user.save(update_fields=["email", "updated_at"])
 
         return Response(TeamMemberItemSerializer(member).data, status=status.HTTP_200_OK)
 

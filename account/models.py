@@ -2,7 +2,7 @@ from django.db import models
 from core.common_models import BaseModel
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from .managers import UserManager
-from core.constants import UserStatus, UserType, OTPPurpose, TeamMemberStatus, PaymentMethodType
+from core.constants import UserStatus, UserType, OTPPurpose, TeamMemberInviteStatus, TeamMemberStatus, PaymentMethodType
 from django.db import transaction
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.utils.translation import gettext_lazy as _
@@ -134,13 +134,34 @@ class TeamMember(BaseModel):
         return f"{self.user.email} Member of {self.team} ({self.status})"
 
 class TeamMemberInvite(BaseModel):
+    class DeliveryStatus(models.TextChoices):
+        QUEUED = "QUEUED", "Queued"
+        SENDING = "SENDING", "Sending"
+        SENT = "SENT", "Sent"
+        FAILED = "FAILED", "Failed"
+
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="invites")
     team_member_object = models.ForeignKey(TeamMember, on_delete=models.CASCADE, related_name="invites")
     invited_to = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_team_invites")
-    status = models.CharField(max_length=20, choices=TeamMemberStatus.choices, default=TeamMemberStatus.PENDING)
+    status = models.CharField(
+        max_length=20,
+        choices=TeamMemberInviteStatus.choices,
+        default=TeamMemberInviteStatus.PENDING,
+    )
     show_popup = models.BooleanField(default=True)
     expires_at = models.DateTimeField(db_index=True)
+    delivery_status = models.CharField(
+        max_length=20,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.QUEUED,
+        db_index=True,
+    )
+    queued_at = models.DateTimeField(null=True, blank=True)
+    invite_sent_at = models.DateTimeField(null=True, blank=True)
+    last_delivery_attempt_at = models.DateTimeField(null=True, blank=True)
+    delivery_attempt_count = models.PositiveIntegerField(default=0)
+    delivery_failure_detail = models.TextField(blank=True, default="")
     
     def __str__(self):
         return f"{self.invited_to} Invite for Add {self.team} Team Member ({self.status})"

@@ -127,6 +127,7 @@ def EmailInvitationLink(invite, accept_link=None, non_register_user=None):
         "logo_url": _get_logo_url(),
         "ios_app_store_url": settings.IOS_APP_STORE_URL,
         "google_play_store_url": settings.GOOGLE_PLAY_STORE_URL,
+        "enrollment_link": accept_link,
     }
     html_message = render_to_string(
         "team_dashboard/emails/driver_invitation.html",
