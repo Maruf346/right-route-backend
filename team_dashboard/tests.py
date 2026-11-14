@@ -139,8 +139,24 @@ class TeamRouteManagementTests(TestCase):
             user_type=UserType.MAIN_USER,
         )
         TeamMember.objects.create(team=self.team, user=self.driver, username="Driver", status=True)
+        self.driver_c = User.objects.create_user(
+            email="driver-c@example.com",
+            password="DriverPass123!",
+            user_type=UserType.MAIN_USER,
+        )
         self.client = APIClient()
         self.client.force_authenticate(self.owner)
+
+    def _flat_route_payload(self, name="Dashboard Draft"):
+        return {
+            "name": name,
+            "start_location": "Lincoln, NE",
+            "start_latitude": 40.8136,
+            "start_longitude": -96.7026,
+            "end_location": "Omaha, NE",
+            "end_latitude": 41.2565,
+            "end_longitude": -95.9345,
+        }
 
     def test_create_route_accepts_continuous_nested_permits(self):
         payload = {
@@ -155,6 +171,7 @@ class TeamRouteManagementTests(TestCase):
                 {
                     "index": 1,
                     "name": "Permit 1",
+                    "permit_number": "P-100",
                     "issuing_state": "NE",
                     "start_location": "Lincoln, NE",
                     "start_latitude": 40.8136,
@@ -171,6 +188,7 @@ class TeamRouteManagementTests(TestCase):
                 {
                     "index": 2,
                     "name": "Permit 2",
+                    "permit_number": "P-200",
                     "issuing_state": "IA",
                     "start_location": "State Border",
                     "start_latitude": 41.2619,
@@ -191,8 +209,14 @@ class TeamRouteManagementTests(TestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         route = Route.objects.get(id=response.data["route_id"])
+        self.assertEqual(route.user_id, self.driver.id)
+        self.assertEqual(route.created_by_id, self.owner.id)
+        self.assertEqual(route.status, "DRAFT")
         self.assertEqual(route.permits.count(), 2)
         self.assertEqual(list(route.permits.values_list("issuing_state", flat=True)), ["NE", "IA"])
+        self.assertEqual(list(route.permits.values_list("permit_number", flat=True)), ["P-100", "P-200"])
+        self.assertEqual(route.permits.get(index=1).waypoints.count(), 1)
+        self.assertEqual(route.permits.get(index=2).waypoints.count(), 0)
 
     def test_create_route_rejects_disconnected_permits(self):
         payload = {
@@ -232,7 +256,7 @@ class TeamRouteManagementTests(TestCase):
         self.assertIn("must match", str(response.data))
 
     def test_waypoint_insert_and_delete_keep_contiguous_order(self):
-        route = Route.objects.create(created_by=self.driver, team=self.team, name="Route")
+        route = Route.objects.create(user=self.driver, created_by=self.driver, team=self.team, name="Route")
         permit = RoutePermit.objects.create(
             route=route,
             index=1,
@@ -304,6 +328,174 @@ class TeamRouteManagementTests(TestCase):
         )
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["issuing_state"], "NE")
+
+    @patch("route.service.get_intersection_lat_lng")
+    @patch("route.service._geocode_named_location")
+    @patch("route.service.extract_route_data")
+    def test_parse_two_files_sequentially_keeps_second_result_isolated(
+        self,
+        mocked_extract,
+        mocked_geocode,
+        mocked_intersections,
+    ):
+        mocked_extract.side_effect = [
+            {
+                "permit_number": "P-100",
+                "issuing_state": "NE",
+                "origin": "First Origin",
+                "destination": "First Destination",
+                "waypoints": ["US-30 EB"],
+            },
+            {
+                "permit_number": "P-200",
+                "issuing_state": "IA",
+                "origin": "Second Origin",
+                "destination": "Second Destination",
+                "waypoints": ["IA-92 EB", "Unmapped IA Road"],
+            },
+        ]
+        locations = {
+            "First Origin": (41.1, -97.1),
+            "First Destination": (41.8, -96.2),
+            "Second Origin": (41.2, -95.9),
+            "Second Destination": (41.6, -94.8),
+        }
+        mocked_geocode.side_effect = lambda name, _state: {
+            "name": name,
+            "latitude": locations[name][0],
+            "longitude": locations[name][1],
+        }
+        mocked_intersections.side_effect = [
+            [{"name": "US-30 EB", "lat": 41.3, "lng": -96.9}],
+            [{"name": "IA-92 EB", "lat": 41.4, "lng": -95.2}],
+        ]
+
+        first_response = self.client.post(
+            reverse("team-permit-parse"),
+            {"file": SimpleUploadedFile("permit-one.pdf", b"first", content_type="application/pdf")},
+            format="multipart",
+        )
+        second_response = self.client.post(
+            reverse("team-permit-parse"),
+            {"file": SimpleUploadedFile("permit-two.pdf", b"second", content_type="application/pdf")},
+            format="multipart",
+        )
+
+        self.assertEqual(first_response.status_code, 200, first_response.data)
+        self.assertEqual(second_response.status_code, 200, second_response.data)
+        self.assertEqual(second_response.data["permit_number"], "P-200")
+        self.assertEqual(second_response.data["issuing_state"], "IA")
+        self.assertEqual([item["name"] for item in second_response.data["waypoints"]], ["IA-92 EB"])
+        self.assertEqual(second_response.data["unresolved_waypoints"], ["Unmapped IA Road"])
+        self.assertNotIn("P-100", str(second_response.data))
+        self.assertNotIn("US-30 EB", str(second_response.data))
+
+    @patch("route.service.parse_permit_route")
+    def test_parse_rejects_non_finite_coordinates(self, mocked_parse):
+        mocked_parse.return_value = {
+            "status": "success",
+            "permit_number": "P-BAD",
+            "issuing_state": "NE",
+            "origin": {"name": "Origin", "latitude": float("nan"), "longitude": -97.1},
+            "destination": None,
+            "waypoints": [],
+            "unresolved_waypoints": [],
+        }
+
+        response = self.client.post(
+            reverse("team-permit-parse"),
+            {"permit_text": "Nebraska DOT permit"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+
+    @patch("route.service.extract_route_data")
+    def test_parse_failure_returns_non_success_status(self, mocked_extract):
+        mocked_extract.side_effect = ValidationError("Permit OCR extraction failed.")
+
+        response = self.client.post(
+            reverse("team-permit-parse"),
+            {"file": SimpleUploadedFile("broken.pdf", b"broken", content_type="application/pdf")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+
+    def test_dashboard_created_draft_is_visible_to_driver_and_team_history_only(self):
+        create_response = self.client.post(
+            reverse("team-driver-route-create", kwargs={"user_id": self.driver.id}),
+            self._flat_route_payload(),
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        route_id = create_response.data["route_id"]
+
+        self.client.force_authenticate(self.driver)
+        driver_response = self.client.get(reverse("route-list"))
+        self.assertEqual(driver_response.status_code, 200, driver_response.data)
+        self.assertIn(route_id, [route["id"] for route in driver_response.data["data"]])
+
+        self.client.force_authenticate(self.driver_c)
+        driver_c_response = self.client.get(reverse("route-list"))
+        self.assertNotIn(route_id, [route["id"] for route in driver_c_response.data["data"]])
+
+        self.client.force_authenticate(self.owner)
+        history_response = self.client.get(
+            reverse("team-route-history-list"),
+            {"user_id": self.driver.id},
+        )
+        self.assertEqual(history_response.status_code, 200, history_response.data)
+        self.assertIn(route_id, [route["id"] for route in history_response.data])
+
+        other_owner = User.objects.create_user(
+            email="other-route-owner@example.com",
+            password="OwnerPass123!",
+            user_type=UserType.MAIN_USER,
+        )
+        self.client.force_authenticate(other_owner)
+        other_history = self.client.get(reverse("team-route-history-list"))
+        self.assertNotIn(route_id, [route["id"] for route in other_history.data])
+
+    def test_create_route_rejects_user_outside_team(self):
+        response = self.client.post(
+            reverse("team-driver-route-create", kwargs={"user_id": self.driver_c.id}),
+            self._flat_route_payload(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404, response.data)
+        self.assertFalse(Route.objects.filter(user=self.driver_c).exists())
+
+    def test_create_route_rejects_unenrolled_member(self):
+        TeamMember.objects.create(
+            team=self.team,
+            user=self.driver_c,
+            username="Driver C",
+            status=False,
+        )
+
+        response = self.client.post(
+            reverse("team-driver-route-create", kwargs={"user_id": self.driver_c.id}),
+            self._flat_route_payload(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertFalse(Route.objects.filter(user=self.driver_c).exists())
+
+    @patch("team_dashboard.views._create_or_update_permit")
+    def test_nested_save_failure_rolls_back_route(self, mocked_permit_save):
+        mocked_permit_save.side_effect = ValidationError({"waypoints": "Invalid nested waypoint."})
+
+        response = self.client.post(
+            reverse("team-driver-route-create", kwargs={"user_id": self.driver.id}),
+            self._flat_route_payload("Must Roll Back"),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertFalse(Route.objects.filter(name="Must Roll Back").exists())
 
 
 class TeamUserManagementTests(TestCase):

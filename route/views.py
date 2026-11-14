@@ -53,7 +53,7 @@ class RouteViewSets(OwnModelViewSet):
                 "permits",
                 "permits__waypoints"
             ).filter(
-                created_by=self.request.user
+                user=self.request.user
             )
         )
     
@@ -411,7 +411,7 @@ class RouteViewSets(OwnModelViewSet):
         with transaction.atomic():
             routes = Route.objects.filter(
                 id__in=route_ids,
-                created_by=request.user
+                user=request.user
             )
             deleted_count = routes.count()
             routes.delete()
@@ -429,6 +429,7 @@ class RouteViewSets(OwnModelViewSet):
             source_route = self.get_object()
             with transaction.atomic():
                 new_route = Route.objects.create(
+                    user=request.user,
                     created_by=request.user,
                     team=source_route.team,
                     name=f"{source_route.name} (Copy)",
@@ -515,8 +516,8 @@ class AdminRouteHistoryQueryMixin:
         "-total_distance_km": "-total_distance_km",
         "total_waypoints": "total_waypoints",
         "-total_waypoints": "-total_waypoints",
-        "driver_email": "created_by__email",
-        "-driver_email": "-created_by__email",
+        "driver_email": "user__email",
+        "-driver_email": "-user__email",
     }
 
     def parse_datetime_param(self, value, end_of_day=False):
@@ -552,7 +553,7 @@ class AdminRouteHistoryQueryMixin:
 
     def base_queryset(self):
         return (
-            Route.objects.select_related("created_by", "team")
+            Route.objects.select_related("user", "created_by", "team")
             .prefetch_related("permits")
             .annotate(permit_count=Count("permits", distinct=True))
         )
@@ -589,11 +590,11 @@ class AdminRouteHistoryQueryMixin:
 
         user_id = params.get("user_id")
         if user_id:
-            queryset = queryset.filter(created_by_id=user_id)
+            queryset = queryset.filter(user_id=user_id)
 
         user_email = params.get("user_email")
         if user_email:
-            queryset = queryset.filter(created_by__email__iexact=user_email.strip())
+            queryset = queryset.filter(user__email__iexact=user_email.strip())
 
         team_id = params.get("team_id")
         if team_id:
@@ -613,7 +614,7 @@ class AdminRouteHistoryQueryMixin:
             queryset = queryset.filter(
                 Q(name__icontains=search)
                 | Q(description__icontains=search)
-                | Q(created_by__email__icontains=search)
+                | Q(user__email__icontains=search)
                 | Q(team__name__icontains=search)
             )
 

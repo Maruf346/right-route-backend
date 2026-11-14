@@ -392,7 +392,7 @@ class RouteHistoryItemSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
     created_at_formatted = serializers.SerializerMethodField()
     driver_name = serializers.SerializerMethodField()
-    driver_email = serializers.EmailField(source="created_by.email")
+    driver_email = serializers.EmailField(source="user.email")
     total_distance_km = serializers.FloatField()
     total_waypoints = serializers.IntegerField()
     status = serializers.CharField()
@@ -411,7 +411,7 @@ class RouteHistoryItemSerializer(serializers.Serializer):
         return ""
 
     def get_driver_name(self, obj):
-        driver = obj.created_by
+        driver = obj.user
         return driver.email.split("@")[0]
 
 
@@ -684,6 +684,17 @@ class TeamPermitParsedLocationSerializer(serializers.Serializer):
     name = serializers.CharField()
     latitude = serializers.FloatField()
     longitude = serializers.FloatField()
+
+    def validate(self, attrs):
+        import math
+
+        latitude = attrs["latitude"]
+        longitude = attrs["longitude"]
+        if not (math.isfinite(latitude) and math.isfinite(longitude)):
+            raise serializers.ValidationError("Coordinates must be finite numbers.")
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            raise serializers.ValidationError("Coordinates are outside geographic bounds.")
+        return attrs
 
 
 class TeamPermitParsedWaypointSerializer(TeamPermitParsedLocationSerializer):

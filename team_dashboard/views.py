@@ -1365,8 +1365,6 @@ class TeamUserDetailView(APIView):
         OpenApiParameter("user_id", OpenApiTypes.INT, description="Filter by team driver user ID."),
         OpenApiParameter("user_email", OpenApiTypes.EMAIL, description="Filter by team driver email."),
         OpenApiParameter("search", OpenApiTypes.STR, description="Search route name, description, or driver email."),
-        OpenApiParameter("page", OpenApiTypes.INT, description="Page number."),
-        OpenApiParameter("page_size", OpenApiTypes.INT, description="Page size."),
     ],
     responses={200: RouteHistoryItemSerializer(many=True)},
 )
@@ -1378,25 +1376,23 @@ class TeamRouteHistoryListView(APIView):
         team = get_team_for_user(request.user)
         from route.models import Route
         from django.db.models import Q
-        from django.core.paginator import Paginator
-
-
-        # Base query for routes: belongs to team or created by team members
+        # Team is the authorization boundary; user is the selected driver.
         if team:
-            team_driver_ids = list(team.members.values_list("user_id", flat=True)) + [team.owner_id]
-            routes_qs = Route.objects.filter(
-                Q(team=team) | Q(created_by_id__in=team_driver_ids)
-            ).select_related("created_by").order_by("-created_at")
+            routes_qs = (
+                Route.objects.filter(team=team)
+                .select_related("user", "created_by")
+                .order_by("-created_at")
+            )
         else:
             routes_qs = Route.objects.none()
 
         driver_user_id = request.query_params.get("user_id")
         if driver_user_id:
-            routes_qs = routes_qs.filter(created_by_id=driver_user_id)
+            routes_qs = routes_qs.filter(user_id=driver_user_id)
 
         driver_email = request.query_params.get("user_email")
         if driver_email:
-            routes_qs = routes_qs.filter(created_by__email__iexact=driver_email.strip())
+            routes_qs = routes_qs.filter(user__email__iexact=driver_email.strip())
 
         # Search filter
         search = request.query_params.get("search") or request.query_params.get("q")
@@ -1405,38 +1401,17 @@ class TeamRouteHistoryListView(APIView):
             routes_qs = routes_qs.filter(
                 Q(name__icontains=search)
                 | Q(description__icontains=search)
-                | Q(created_by__email__icontains=search)
+                | Q(user__email__icontains=search)
             )
 
-        # Pagination (10 per page)
-        page_number = request.query_params.get("page", 1)
-        page_size = request.query_params.get("page_size", 10)
-        paginator = Paginator(routes_qs, page_size)
-        page_obj = paginator.get_page(page_number)
-
-        # Compute sequential #010, #009 based on total count
-        total_count = paginator.count
-        start_seq = total_count - ((page_obj.number - 1) * int(page_size))
-        route_items = []
-        for idx, r in enumerate(page_obj.object_list):
+        # This endpoint's published contract is a JSON array.
+        route_items = list(routes_qs)
+        start_seq = len(route_items)
+        for idx, r in enumerate(route_items):
             r._route_sequence_number = max(1, start_seq - idx)
-            route_items.append(r)
 
         serializer = RouteHistoryItemSerializer(route_items, many=True)
-        return Response(
-            {
-                "success": True,
-                "pagination": {
-                    "current_page": page_obj.number,
-                    "total_pages": paginator.num_pages,
-                    "total_count": paginator.count,
-                    "has_next": page_obj.has_next(),
-                    "has_previous": page_obj.has_previous(),
-                },
-                "results": serializer.data,
-            },
-            status=status.HTTP_200_OK,
-        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 @extend_schema(
@@ -1495,8 +1470,7 @@ class TeamRouteHistoryBulkDeleteView(APIView):
 
         routes = Route.objects.filter(id__in=route_ids)
         if team:
-            team_driver_ids = list(team.members.values_list("user_id", flat=True)) + [team.owner_id]
-            routes = routes.filter(Q(team=team) | Q(created_by_id__in=team_driver_ids))
+            routes = routes.filter(team=team)
         else:
             routes = Route.objects.none()
 
@@ -1531,10 +1505,11 @@ class TeamRouteHistoryDownloadCSVView(APIView):
 
 
         if team:
-            team_driver_ids = list(team.members.values_list("user_id", flat=True)) + [team.owner_id]
-            routes = Route.objects.filter(
-                Q(team=team) | Q(created_by_id__in=team_driver_ids)
-            ).select_related("created_by").order_by("-created_at")
+            routes = (
+                Route.objects.filter(team=team)
+                .select_related("user", "created_by")
+                .order_by("-created_at")
+            )
         else:
             routes = Route.objects.none()
 
@@ -1548,13 +1523,13 @@ class TeamRouteHistoryDownloadCSVView(APIView):
         for idx, r in enumerate(routes):
             route_num = f"#{total - idx:03d}"
             date_str = r.created_at.strftime("%Y-%m-%d") if r.created_at else ""
-            driver_name = r.created_by.email.split("@")[0]
+            driver_name = r.user.email.split("@")[0]
             writer.writerow([
                 route_num,
                 date_str,
                 r.name or "Untitled Route",
                 driver_name,
-                r.created_by.email,
+                r.user.email,
                 f"{r.total_distance_km:.1f}",
                 r.total_waypoints,
                 r.status,
@@ -1677,19 +1652,12 @@ class TeamPermitParseView(APIView):
             permit_text=serializer.validated_data.get("permit_text"),
             state_hint=serializer.validated_data.get("state_hint"),
         )
-        return Response(parsed, status=status.HTTP_200_OK)
+        response_serializer = TeamPermitParseResponseSerializer(data=parsed)
+        response_serializer.is_valid(raise_exception=True)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 def _team_can_manage_all_routes(user):
     return is_team_super_admin(user) or ("manage.route_history.team" in get_user_team_permissions(user))
-
-
-def _team_driver_user_ids(team):
-    if not team:
-        return []
-    ids = list(team.members.values_list("user_id", flat=True))
-    if team.owner_id:
-        ids.append(team.owner_id)
-    return list(set(ids))
 
 
 def _team_route_queryset(request):
@@ -1699,9 +1667,11 @@ def _team_route_queryset(request):
     if not team:
         return Route.objects.none()
 
-    queryset = Route.objects.filter(
-        Q(team=team) | Q(created_by_id__in=_team_driver_user_ids(team))
-    ).select_related("created_by", "team").prefetch_related("permits", "permits__waypoints")
+    queryset = (
+        Route.objects.filter(team=team)
+        .select_related("user", "created_by", "team")
+        .prefetch_related("permits", "permits__waypoints")
+    )
 
     return queryset
 
@@ -1711,7 +1681,7 @@ def _get_team_route_or_404(request, route_id):
 
 
 def _get_target_team_driver_or_error(request, user_id):
-    from account.models import TeamMember, User
+    from account.models import TeamMember
 
     team = get_team_for_user(request.user)
     if not team:
@@ -1723,16 +1693,20 @@ def _get_target_team_driver_or_error(request, user_id):
         return None, Response({"detail": "Invalid user_id."}, status=status.HTTP_400_BAD_REQUEST)
 
 
-    is_owner = team.owner_id == user_id
-    is_member = TeamMember.objects.filter(team=team, user_id=user_id).exists()
-    if not (is_owner or is_member):
+    membership = (
+        TeamMember.objects.select_related("user")
+        .filter(team=team, user_id=user_id)
+        .first()
+    )
+    if not membership:
         return None, Response({"detail": "Driver does not belong to this team."}, status=status.HTTP_404_NOT_FOUND)
+    if not membership.status or not membership.user.is_active:
+        return None, Response(
+            {"detail": "Driver is not enrolled and active on this team."},
+            status=status.HTTP_409_CONFLICT,
+        )
 
-    user = User.objects.filter(id=user_id, is_active=True).first()
-    if not user:
-        return None, Response({"detail": "Driver user not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
-
-    return user, None
+    return membership.user, None
 
 
 def _sync_route_waypoint_count(route):
@@ -1941,7 +1915,8 @@ class TeamDriverRouteCreateView(APIView):
                 name = f"{data.get('start_location', '')} to {data.get('end_location', '')}".strip(" to") or "Untitled Route"
 
             route = Route.objects.create(
-                created_by=target_user,
+                user=target_user,
+                created_by=request.user,
                 team=team,
                 name=name,
                 description=data.get("description"),

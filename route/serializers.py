@@ -154,6 +154,7 @@ class RouteCreateSerializer(serializers.Serializer):
             if name is None:
                 name = f"{validated_data.get("start_location", "")} to {validated_data.get("end_location", "")}"
             route = Route.objects.create(
+                user=request.user,
                 created_by=request.user,
                 team=team,
                 name=name
@@ -251,7 +252,7 @@ class RouteBulkDeleteSerializer(serializers.Serializer):
 class AdminRouteHistoryListSerializer(serializers.ModelSerializer):
     route_number = serializers.SerializerMethodField()
     driver_name = serializers.SerializerMethodField()
-    driver_email = serializers.EmailField(source="created_by.email")
+    driver_email = serializers.EmailField(source="user.email")
     account_type = serializers.SerializerMethodField()
     team_name = serializers.SerializerMethodField()
     fleet_name = serializers.SerializerMethodField()
@@ -282,7 +283,7 @@ class AdminRouteHistoryListSerializer(serializers.ModelSerializer):
         return f"RR-{obj.created_at.year if obj.created_at else '0000'}-{obj.id:06d}"
 
     def get_driver_name(self, obj):
-        user = obj.created_by
+        user = obj.user
         if obj.team_id:
             membership = TeamMember.objects.filter(team_id=obj.team_id, user=user).first()
             if membership and membership.username:
@@ -335,7 +336,8 @@ class AdminRoutePermitBasicSerializer(serializers.ModelSerializer):
 
 class AdminRouteHistoryDetailSerializer(AdminRouteHistoryListSerializer):
     description = serializers.CharField(allow_blank=True, allow_null=True)
-    created_by_id = serializers.IntegerField(source="created_by.id")
+    created_by_id = serializers.IntegerField(source="created_by.id", allow_null=True)
+    user_id = serializers.IntegerField(source="user.id")
     team_id = serializers.IntegerField(allow_null=True)
     started_at = serializers.DateTimeField(allow_null=True)
     completed_at = serializers.DateTimeField(allow_null=True)
@@ -349,6 +351,7 @@ class AdminRouteHistoryDetailSerializer(AdminRouteHistoryListSerializer):
         fields = AdminRouteHistoryListSerializer.Meta.fields + [
             "description",
             "created_by_id",
+            "user_id",
             "team_id",
             "started_at",
             "completed_at",

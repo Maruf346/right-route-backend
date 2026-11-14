@@ -4,11 +4,17 @@ Sends confirmation, staff alert, assignment, and response emails using the activ
 """
 
 import logging
+import mimetypes
 from django.core.mail import EmailMessage, get_connection
 from django.conf import settings
 from core.models import EmailConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _ticket_dashboard_url(ticket):
+    base_url = getattr(settings, "ADMIN_DASHBOARD_URL", "https://admin.getrightroute.app").rstrip("/")
+    return f"{base_url}/dashboard/support-tickets/{ticket.id}"
 
 def _get_connection_and_sender():
     """Use active EmailConfig, falling back to the configured EMAIL_* SMTP settings."""
@@ -46,7 +52,7 @@ def _get_connection_and_sender():
     return conn, sender
 
 
-def _send_email(subject, body_html, to_emails):
+def _send_email(subject, body_html, to_emails, attachments=None):
     """Send an HTML email and return whether the SMTP backend accepted it."""
     if isinstance(to_emails, str):
         to_emails = [to_emails]
@@ -61,6 +67,17 @@ def _send_email(subject, body_html, to_emails):
             connection=conn,
         )
         msg.content_subtype = "html"
+        for attachment in attachments or []:
+            attachment.file.open("rb")
+            try:
+                content_type = mimetypes.guess_type(attachment.original_filename)[0]
+                msg.attach(
+                    attachment.original_filename,
+                    attachment.file.read(),
+                    content_type,
+                )
+            finally:
+                attachment.file.close()
         sent_count = msg.send(fail_silently=False)
         if sent_count != 1:
             logger.error(f"Support email backend accepted {sent_count} messages for {to_emails}.")
@@ -106,7 +123,7 @@ def send_staff_notification_email(ticket):
     Sends internal notification to help@getrightroute.app when a new ticket is submitted.
     """
     subject = f"New Support Ticket: {ticket.ticket_number} - {ticket.subject}"
-    dashboard_url = f"https://admin.getrightroute.app/support/tickets/{ticket.id}"
+    dashboard_url = _ticket_dashboard_url(ticket)
     
     body_html = f"""
     <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -127,7 +144,12 @@ def send_staff_notification_email(ticket):
         <p><a href="{dashboard_url}" style="background-color: #1a56db; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block;">Open Ticket in Admin Dashboard</a></p>
     </div>
     """
-    return _send_email(subject, body_html, settings.SUPPORT_TICKET_RECIPIENT_EMAIL)
+    return _send_email(
+        subject,
+        body_html,
+        settings.SUPPORT_TICKET_RECIPIENT_EMAIL,
+        attachments=ticket.attachments.all(),
+    )
 
 
 def send_assignment_email(ticket, assignee_user, assignee_name=None):
@@ -146,7 +168,7 @@ def send_assignment_email(ticket, assignee_user, assignee_name=None):
         return False
 
     subject = f"Support ticket assigned: {ticket.ticket_number}"
-    dashboard_url = f"https://admin.getrightroute.app/support/tickets/{ticket.id}"
+    dashboard_url = _ticket_dashboard_url(ticket)
 
     body_html = f"""
     <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">

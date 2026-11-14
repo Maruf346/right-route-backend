@@ -7,7 +7,13 @@ from core.constants import AIProcessingStatus, RouteStatus, PermitProcessingStat
 
 
 class Route(BaseModel):
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="routes")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="routes")
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="created_routes",
+    )
     team = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name="routes")
 
     name = models.CharField(max_length=255, blank=True, null=True)
@@ -42,6 +48,7 @@ class Route(BaseModel):
     class Meta:
         indexes = [
             models.Index(fields=["status"]),
+            models.Index(fields=["user"]),
             models.Index(fields=["created_by"]),
         ]
 

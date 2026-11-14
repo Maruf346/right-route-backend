@@ -148,8 +148,25 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
 def _valid_coord(coord) -> bool:
     if not coord or len(coord) != 2:
         return False
-    lat, lng = coord
-    return lat is not None and lng is not None and (abs(lat) > 0.001 or abs(lng) > 0.001)
+    return _coerce_coordinate_pair(coord[0], coord[1]) is not None
+
+
+def _coerce_coordinate_pair(lat, lng):
+    """Return finite numeric coordinates within geographic bounds, or None."""
+    if isinstance(lat, bool) or isinstance(lng, bool):
+        return None
+    try:
+        lat = float(lat)
+        lng = float(lng)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(lat) and math.isfinite(lng)):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    if abs(lat) <= 0.001 and abs(lng) <= 0.001:
+        return None
+    return lat, lng
 
 
 def _is_within_corridor(lat: float, lng: float, start_coords, end_coords, margin_deg: float = 2.5) -> bool:
@@ -225,9 +242,10 @@ def _geocode_single_intersection(address: str, bounds_str: str | None, start_coo
             if state_code and _result_state_code(result) != state_code:
                 continue
             loc = (result.get("geometry") or {}).get("location") or {}
-            lat, lng = loc.get("lat"), loc.get("lng")
-            if lat is None or lng is None:
+            coordinates = _coerce_coordinate_pair(loc.get("lat"), loc.get("lng"))
+            if coordinates is None:
                 continue
+            lat, lng = coordinates
             if not _is_within_corridor(lat, lng, start_coords, end_coords):
                 continue
             types = result.get("types") or []
@@ -385,7 +403,10 @@ def get_intersection_lat_lng(address_list: list, start_coords=None, end_coords=N
     for item in resolved:
         if not item:
             continue
-        lat, lng = item["lat"], item["lng"]
+        coordinates = _coerce_coordinate_pair(item.get("lat"), item.get("lng"))
+        if coordinates is None:
+            continue
+        lat, lng = coordinates
         if _valid_coord(start_coords) and _haversine_km(lat, lng, start_coords[0], start_coords[1]) < 0.15:
             continue
         if _valid_coord(end_coords) and _haversine_km(lat, lng, end_coords[0], end_coords[1]) < 0.15:
@@ -451,10 +472,13 @@ def _geocode_named_location(name, state_code):
     )
     if not result:
         return None
+    coordinates = _coerce_coordinate_pair(result.get("lat"), result.get("lng"))
+    if coordinates is None:
+        return None
     return {
         "name": name,
-        "latitude": result["lat"],
-        "longitude": result["lng"],
+        "latitude": coordinates[0],
+        "longitude": coordinates[1],
     }
 
 
@@ -493,22 +517,25 @@ def parse_permit_route(permit_file=None, permit_text=None, state_hint=None):
         end_coords=end_coords,
         state_hint=issuing_state,
     )
-    waypoints = [
-        {
-            "index": index,
+    waypoints = []
+    for item in resolved:
+        coordinates = _coerce_coordinate_pair(item.get("lat"), item.get("lng"))
+        if coordinates is None:
+            continue
+        waypoints.append({
+            "index": len(waypoints) + 1,
             "name": item["name"],
             "waypoint_type": "CHECKPOINT",
-            "latitude": item["lat"],
-            "longitude": item["lng"],
-        }
-        for index, item in enumerate(resolved, start=1)
-    ]
+            "latitude": coordinates[0],
+            "longitude": coordinates[1],
+        })
 
     permit_number = _first_value(
         route_data,
         ("permit_number", "permit_no", "permit_id", "number"),
     )
-    unresolved = [name for name in waypoint_names if name not in {item["name"] for item in resolved}]
+    resolved_names = {item["name"] for item in waypoints}
+    unresolved = [name for name in waypoint_names if name not in resolved_names]
     return {
         "status": "success",
         "permit_number": permit_number,

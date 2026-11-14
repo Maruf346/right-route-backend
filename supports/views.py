@@ -754,8 +754,32 @@ class TeamSubmitTicketView(APIView):
     required_team_permission = "support.submit_ticket"
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    @staticmethod
+    def _submission_data(request):
+        """Normalize repeated multipart screenshot fields to uploaded_files."""
+        data = request.data.copy()
+        uploaded_files = []
+        accepted_keys = {
+            "uploaded_files",
+            "uploaded_files[]",
+            "screenshot",
+            "screenshots",
+            "attachment",
+            "attachments",
+        }
+        for key in request.FILES.keys():
+            if key in accepted_keys or key.startswith("uploaded_files["):
+                uploaded_files.extend(request.FILES.getlist(key))
+
+        if uploaded_files:
+            if hasattr(data, "setlist"):
+                data.setlist("uploaded_files", uploaded_files)
+            else:
+                data["uploaded_files"] = uploaded_files
+        return data
+
     def post(self, request):
-        serializer = TeamSubmitTicketSerializer(data=request.data, context={"request": request})
+        serializer = TeamSubmitTicketSerializer(data=self._submission_data(request), context={"request": request})
         serializer.is_valid(raise_exception=True)
         ticket = serializer.save()
         log_activity(request, NotifyLogAction.CREATE, ticket, "Team support ticket submitted.", {
@@ -776,6 +800,7 @@ class TeamSubmitTicketView(APIView):
                 "customer_confirmation_sent": getattr(ticket, "customer_confirmation_sent", False),
                 "staff_notification_sent": getattr(ticket, "staff_notification_sent", False),
                 "staff_notification_email": settings.SUPPORT_TICKET_RECIPIENT_EMAIL,
+                "attachment_count": ticket.attachments.count(),
             },
             status=status.HTTP_201_CREATED,
         )
