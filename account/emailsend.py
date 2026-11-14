@@ -1,14 +1,34 @@
-from core.models import EmailConfig
+from email.message import MIMEPart
+from pathlib import Path
+
 from django.core.mail import EmailMessage, get_connection
 from django.conf import settings
 from rest_framework.response import Response
 from django.template.loader import render_to_string
+
+from core.models import EmailConfig
 
 
 def _get_logo_url():
     """Return absolute URL for the RightRoute logo used in email templates."""
     site_url = getattr(settings, "SITE_URL", "https://getrightroute.app")
     return f"{site_url}/static/logo.png"
+
+
+def _attach_inline_svg(email_message, filename, content_id):
+    """Attach an SVG from static/email so an email does not depend on a remote badge image."""
+    asset_path = Path(settings.BASE_DIR) / "static" / "email" / filename
+    with asset_path.open("rb") as asset_file:
+        asset = MIMEPart()
+        asset.set_content(
+            asset_file.read(),
+            maintype="image",
+            subtype="svg+xml",
+            disposition="inline",
+            cid=f"<{content_id}>",
+            filename=filename,
+        )
+    email_message.attach(asset)
 
 
 def _build_connection(email_config):
@@ -122,6 +142,8 @@ def EmailInvitationLink(invite, accept_link=None, non_register_user=None):
         connection=connection,
     )
     email_message.content_subtype = "html"
+    _attach_inline_svg(email_message, "app-store.svg", "app-store-badge")
+    _attach_inline_svg(email_message, "google-play.svg", "google-play-badge")
 
     try:
         email_message.send()

@@ -1,12 +1,15 @@
 from unittest.mock import patch
+from types import SimpleNamespace
 
-from django.test import TestCase
+from django.core import mail
+from django.test import TestCase, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from rest_framework.test import APIClient
 from rest_framework.exceptions import ValidationError
 
 from account.models import OTPVerification, Team, TeamMember, User
+from account.emailsend import EmailInvitationLink
 from core.constants import OTPPurpose, UserType
 from team_dashboard.constants import TeamDashboardRole
 from team_dashboard.models import TeamAdminProfile
@@ -15,6 +18,43 @@ from team_dashboard.serializers import (
     TeamVerifyOTPRequestSerializer,
 )
 from route.models import PermitWaypoint, Route, RoutePermit
+
+
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    EMAIL_HOST_USER="mailer@example.com",
+    EMAIL_HOST_PASSWORD="test-password",
+    DEFAULT_FROM_EMAIL="RightRoute <mailer@example.com>",
+    IOS_APP_STORE_URL="https://apps.apple.com/example",
+    GOOGLE_PLAY_STORE_URL="https://play.google.com/store/apps/details?id=com.rightroutes.running",
+)
+class TeamDriverInvitationEmailTests(TestCase):
+    def test_invitation_uses_requested_content_links_and_embedded_store_badges(self):
+        invite = SimpleNamespace(
+            invited_to=SimpleNamespace(email="driver@example.com"),
+            team=SimpleNamespace(name="Acme Hauling"),
+            team_member_object=SimpleNamespace(username="Jane Driver"),
+        )
+
+        self.assertTrue(EmailInvitationLink(invite))
+
+        message = mail.outbox[0]
+        self.assertIn("Hello Jane Driver,", message.body)
+        self.assertIn("join the Acme Hauling Team", message.body)
+        self.assertIn("https://youtu.be/QVbbLaTovho", message.body)
+        self.assertIn("https://youtu.be/Yqlv0VveXI4", message.body)
+        self.assertIn("https://getrightroute.app/Team-Fleet-Driver-User-Guide.pdf", message.body)
+        self.assertIn('href="https://apps.apple.com/example"', message.body)
+        self.assertIn(
+            'href="https://play.google.com/store/apps/details?id=com.rightroutes.running"',
+            message.body,
+        )
+        self.assertIn('src="cid:app-store-badge"', message.body)
+        self.assertIn('src="cid:google-play-badge"', message.body)
+        self.assertEqual(
+            {attachment.get_filename() for attachment in message.attachments},
+            {"app-store.svg", "google-play.svg"},
+        )
 
 
 class LockedTeamAdminLoginTests(TestCase):
