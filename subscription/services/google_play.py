@@ -246,3 +246,4 @@ class GooglePlayBillingService:
             "package_name": resolved_package,
             "raw_response": {"verification_source": "client_fallback_unconfigured"},
         }
+

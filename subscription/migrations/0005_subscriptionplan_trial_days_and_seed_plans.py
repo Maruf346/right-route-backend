@@ -145,3 +145,4 @@ class Migration(migrations.Migration):
         ),
         migrations.RunPython(seed_play_store_plans, noop_reverse),
     ]
+
