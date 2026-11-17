@@ -62,9 +62,19 @@ jobs:
           ssh -i ~/.ssh/right-route.pem "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" << EOF
             set -e
             cd "$EC2_APP_DIR"
+            # Remember the image that is running now, so it stays on disk for a quick rollback.
+            PREV_IMAGE=\$(docker inspect --format '{{.Config.Image}}' right_route_backend 2>/dev/null || true)
             printf 'IMAGE_URI=%s\n' "$IMAGE_URI" > .deploy.env
             aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ steps.ecr-login.outputs.registry }}"
             docker compose --env-file .deploy.env -f docker-compose.prod.yml pull backend
             docker compose --env-file .deploy.env -f docker-compose.prod.yml up -d
+            # Each backend image is ~2.8GB. Keep only the new image and the previous one;
+            # older tags stay available in ECR. "docker image prune" alone skips tagged images.
+            for img in \$(docker images "${{ steps.ecr-login.outputs.registry }}/$ECR_REPOSITORY" --format '{{.Repository}}:{{.Tag}}'); do
+              if [ "\$img" != "$IMAGE_URI" ] && [ "\$img" != "\$PREV_IMAGE" ]; then
+                docker rmi "\$img" || true
+              fi
+            done
             docker image prune -f
+            docker builder prune -af || true
           EOF
