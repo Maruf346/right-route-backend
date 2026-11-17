@@ -150,18 +150,26 @@ class ContinueAPIView(OwnAPIView):
     def success_response(self, serializer):
         email = serializer.validated_data["email"]
         register_user_exists = self.user_has_valid_password(email)
-        if register_user_exists:
-            otp_object = self.send_otp(
-                email=email,
-                purpose=OTPPurpose.LOGIN,
-                user=User.objects.get(email=email),
-            )
+
+        if not register_user_exists:
+            next_step = "CREATE_PASSWORD"
+        else:
+            user = User.objects.get(email=email)
+            if user.is_email_verified:
+                # Email was already verified by OTP at registration, so login is
+                # email + password only (also lets App Store / Play reviewers sign in).
+                next_step = "SUBMIT_PASSWORD"
+            else:
+                # Account exists but its email was never verified: verify it first.
+                self.send_otp(email=email, purpose=OTPPurpose.LOGIN, user=user)
+                next_step = "OTP_VERIFY"
+
         return Response(
             {
                 "success": True,
                 "email": email,
                 "is_registered": register_user_exists,
-                "next_step": ("OTP_VERIFY" if register_user_exists else "CREATE_PASSWORD"),
+                "next_step": next_step,
             }
         )
 
