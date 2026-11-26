@@ -70,6 +70,23 @@ class PaymentTransactionStatus(models.TextChoices):
 class PURCHASE_PLATFORM(models.TextChoices):
     ANDROID = "android"
     IOS = "ios"
+    STRIPE = "stripe"
+    WEB = "web"
+
+class CouponDiscountType(models.TextChoices):
+    PERCENTAGE = "PERCENTAGE", "Percentage"
+    FIXED_AMOUNT = "FIXED_AMOUNT", "Fixed Amount"
+
+class CouponDurationType(models.TextChoices):
+    ONCE = "ONCE", "Once"
+    REPEATING = "REPEATING", "Repeating"
+    FOREVER = "FOREVER", "Forever"
+
+class CouponPlanScope(models.TextChoices):
+    ALL = "ALL", "All Plans"
+    INDIVIDUAL = "INDIVIDUAL", "Individual"
+    TEAM = "TEAM", "Team"
+    FLEET = "FLEET", "Fleet"
 
 class PURCHASE_VERIFY_STATUS(models.TextChoices):
     PENDING = "pending"

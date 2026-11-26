@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.db.models import Sum, Q, Count
 from django.utils import timezone
 
-from subscription.models import UserSubscription, SubscriptionPlan, PurchaseInfo
+from subscription.models import FleetAccount, UserSubscription, SubscriptionPlan, PurchaseInfo
 from account.models import Team, User
 from core.constants import UserSubscriptionStatus, PlanType, BillingType
 from analytics.constants import STANDARD_PLAN_NAMES
@@ -254,10 +254,19 @@ def calculate_active_paying_accounts(target_date):
         subscriptions__expires_at__date__gte=target_date,
     ).distinct().count()
 
-    # TODO: Add dedicated fleet contract accounts once fleet models are implemented.
-    fleet_count = 0
+    fleet_count = FleetAccount.objects.filter(
+        status__in=[UserSubscriptionStatus.ACTIVE, UserSubscriptionStatus.TRIAL],
+        sign_up_date__lte=target_date,
+    ).filter(Q(next_payment_date__isnull=True) | Q(next_payment_date__gte=target_date)).count()
 
-    return max(user_count, team_count + user_count - team_count)
+    return max(user_count, team_count + user_count - team_count) + fleet_count - min(
+        fleet_count,
+        FleetAccount.objects.filter(
+            subscription__status__in=[UserSubscriptionStatus.ACTIVE, UserSubscriptionStatus.TRIAL],
+            subscription__starts_at__date__lte=target_date,
+            subscription__expires_at__date__gte=target_date,
+        ).count(),
+    )
 
 
 def calculate_mrr(target_date):
@@ -288,11 +297,21 @@ def calculate_mrr(target_date):
 
 
 def calculate_fleet_mrr(target_date):
-    """
-    Helper for fleet recurring revenue.
-    TODO: Connect dedicated fleet contract models when implemented.
-    """
-    return Decimal("0.00")
+    """Calculates snapshot Monthly Recurring Revenue from active FleetAccount contracts."""
+    fleets = FleetAccount.objects.filter(
+        status__in=[UserSubscriptionStatus.ACTIVE, UserSubscriptionStatus.TRIAL],
+        sign_up_date__lte=target_date,
+    ).filter(Q(next_payment_date__isnull=True) | Q(next_payment_date__gte=target_date))
+
+    total = Decimal("0.00")
+    for fleet in fleets:
+        if fleet.price:
+            price = Decimal(str(fleet.price))
+            if fleet.billing_type == BillingType.YEARLY:
+                total += price / Decimal("12.0")
+            else:
+                total += price
+    return total.quantize(Decimal("0.01"))
 
 
 def calculate_arr(target_date):
@@ -454,15 +473,21 @@ def calculate_revenue_by_plan(target_date):
         status__in=[UserSubscriptionStatus.ACTIVE, UserSubscriptionStatus.TRIAL],
         starts_at__date__lte=target_date,
         expires_at__date__gte=target_date,
-    ).select_related("plan")
+    ).select_related("plan", "user", "user__fleet_account")
 
     for sub in subs:
-        if sub.plan and sub.plan.price:
-            price = Decimal(str(sub.plan.price))
-            mrr_val = (price / Decimal("12.0")) if sub.plan.billing_type == BillingType.YEARLY else price
-            
-            # Map plan name to standard categories
+        if sub.plan:
             p_name = sub.plan.name
+            fleet_acc = getattr(sub.user, "fleet_account", None) if "fleet" in p_name.lower() else None
+            if fleet_acc and fleet_acc.price:
+                price = Decimal(str(fleet_acc.price))
+                mrr_val = (price / Decimal("12.0")) if fleet_acc.billing_type == BillingType.YEARLY else price
+            elif sub.plan.price:
+                price = Decimal(str(sub.plan.price))
+                mrr_val = (price / Decimal("12.0")) if sub.plan.billing_type == BillingType.YEARLY else price
+            else:
+                continue
+
             if "annual" in p_name.lower() or "yearly" in p_name.lower():
                 plan_key = "Single Annual"
             elif "single" in p_name.lower() or "individual" in p_name.lower():
@@ -515,11 +540,12 @@ def calculate_plan_performance(start_date, end_date):
         status__in=[UserSubscriptionStatus.ACTIVE, UserSubscriptionStatus.TRIAL],
         starts_at__date__lte=end_date,
         expires_at__date__gte=end_date,
-    ).select_related("plan", "team")
+    ).select_related("plan", "team", "user", "user__fleet_account")
 
     for sub in active_subs:
         if sub.plan:
             p_name = sub.plan.name
+            fleet_acc = getattr(sub.user, "fleet_account", None) if "fleet" in p_name.lower() else None
             if "annual" in p_name.lower() or "yearly" in p_name.lower():
                 key = "Single Annual"
                 seats = 1
@@ -528,7 +554,7 @@ def calculate_plan_performance(start_date, end_date):
                 seats = 1
             elif "fleet" in p_name.lower():
                 key = "Fleet"
-                seats = sub.team.max_members if sub.team else 100
+                seats = fleet_acc.driver_allowance if fleet_acc else (sub.team.max_members if sub.team else 100)
             elif sub.plan.team_limit in (5, 10, 25, 50, 100):
                 key = f"Team {sub.plan.team_limit}"
                 seats = sub.plan.team_limit
@@ -536,8 +562,12 @@ def calculate_plan_performance(start_date, end_date):
                 key = "Single Monthly"
                 seats = 1
 
-            price = Decimal(str(sub.plan.price))
-            mrr_val = (price / Decimal("12.0")) if sub.plan.billing_type == BillingType.YEARLY else price
+            if fleet_acc and fleet_acc.price:
+                price = Decimal(str(fleet_acc.price))
+                mrr_val = (price / Decimal("12.0")) if fleet_acc.billing_type == BillingType.YEARLY else price
+            else:
+                price = Decimal(str(sub.plan.price))
+                mrr_val = (price / Decimal("12.0")) if sub.plan.billing_type == BillingType.YEARLY else price
 
             plan_data[key]["active_accounts"] += 1
             plan_data[key]["drivers_or_seats"] += seats

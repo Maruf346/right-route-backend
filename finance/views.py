@@ -139,34 +139,29 @@ class FleetPaymentsListView(APIView):
     pagination_class = FleetPagination
 
     def get(self, request):
+        from subscription.models import FleetAccount
         parsed = parse_calendar_period(request.query_params)
-        
-        # Query active teams / fleet plans
-        teams = Team.objects.filter(is_active=True).select_related("owner").order_by("name")
 
         items = []
-        for team in teams:
-            # Look up subscription
-            sub = team.subscriptions.order_by("-created_at").first()
-            plan_name = sub.plan.name if sub and sub.plan else "Fleet Custom"
-            amount = sub.plan.price if sub and sub.plan else Decimal("0.00")
-            due_date = sub.expires_at.date() if sub and sub.expires_at else None
+        fleet_accounts = FleetAccount.objects.select_related("user", "team").order_by("company_name", "full_name")
 
-            # Filter if date range applies
+        for fleet in fleet_accounts:
+            due_date = fleet.next_payment_date
             if due_date and (due_date < parsed["start_date"] or due_date > parsed["end_date"]):
                 continue
 
+            amount = fleet.price or Decimal("0.00")
             items.append({
-                "id": team.id,
-                "company_name": team.name,
-                "owner_email": team.owner.email if team.owner else "",
-                "plan_name": plan_name,
-                "driver_limit": team.max_members,
+                "id": fleet.id,
+                "company_name": fleet.company_name or fleet.full_name,
+                "owner_email": fleet.user.email,
+                "plan_name": f"Fleet ({fleet.driver_allowance} drivers)",
+                "driver_limit": fleet.driver_allowance,
                 "amount_due": amount,
                 "formatted_amount": f"${amount:,.2f}",
                 "due_date": due_date,
-                "status": "Active" if team.is_active else "Inactive",
-                "user_account_id": team.owner.id if team.owner else None,
+                "status": fleet.status.title(),
+                "user_account_id": fleet.user_id,
             })
 
         paginator = self.pagination_class()

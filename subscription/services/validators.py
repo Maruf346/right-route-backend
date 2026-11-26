@@ -153,15 +153,16 @@ class TeamMemberValidator:
                 "This subscription does not belong to your team."
             )
 
-        # Team limit validation
+        # Team limit validation (prefer team.max_members for custom Fleet allowances)
         active_members = team.members.filter(
             status=True
         ).count()
+        max_allowed = team.max_members if (team.max_members and team.max_members > 0) else subscription.plan.team_limit
 
-        if active_members >= subscription.plan.team_limit:
+        if active_members >= max_allowed:
             raise ValidationError(
                 f"Team member limit reached. "
-                f"Maximum allowed: {subscription.plan.team_limit}"
+                f"Maximum allowed: {max_allowed}"
             )
 
         # Already member?

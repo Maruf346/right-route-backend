@@ -7,8 +7,8 @@ from django.utils import timezone
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
-from subscription.models import UserSubscription, PurchaseInfo
-from core.constants import UserSubscriptionStatus, PlanType
+from subscription.models import FleetAccount, UserSubscription, PurchaseInfo
+from core.constants import BillingType, UserSubscriptionStatus, PlanType
 
 
 def parse_calendar_period(params):
@@ -123,21 +123,35 @@ def calculate_subscription_revenue(start_date, end_date, period="day"):
 
 def calculate_fleet_revenue(start_date, end_date, period="day"):
     """
-    Calculates expected fleet plan revenue for the given date range.
-    TODO: Integrate dedicated fleet contract billing models once implemented.
-    Currently aggregates subscriptions tied to Teams / Fleet plans.
+    Calculates expected fleet plan revenue for the given date range
+    using dedicated FleetAccount records (and fallback team subscriptions).
     """
-    fleet_subs = UserSubscription.objects.filter(
+    fleet_accounts = FleetAccount.objects.filter(
         status__in=[UserSubscriptionStatus.ACTIVE, UserSubscriptionStatus.TRIAL],
-        team__isnull=False,
-        starts_at__date__lte=end_date,
-        expires_at__date__gte=start_date,
-    ).select_related("plan")
-
+    )
     total = Decimal("0.00")
-    for sub in fleet_subs:
-        if sub.plan and sub.plan.price:
-            total += sub.plan.price
+    handled_user_ids = set()
+
+    for fleet in fleet_accounts:
+        handled_user_ids.add(fleet.user_id)
+        due = fleet.next_payment_date
+        if due and (due < start_date or due > end_date):
+            continue
+        if fleet.price:
+            total += Decimal(str(fleet.price))
+
+    # Fallback: include non-fleet team subscriptions that have no FleetAccount record
+    if not fleet_accounts.exists():
+        fleet_subs = UserSubscription.objects.filter(
+            status__in=[UserSubscriptionStatus.ACTIVE, UserSubscriptionStatus.TRIAL],
+            team__isnull=False,
+            starts_at__date__lte=end_date,
+            expires_at__date__gte=start_date,
+        ).exclude(user_id__in=handled_user_ids).select_related("plan")
+
+        for sub in fleet_subs:
+            if sub.plan and sub.plan.price:
+                total += sub.plan.price
 
     return total.quantize(Decimal("0.01"))
 

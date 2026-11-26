@@ -1558,21 +1558,26 @@ class TeamPlanView(APIView):
             return Response({"detail": "No active team found."}, status=status.HTTP_404_NOT_FOUND)
 
         from account.models import TeamMember
-        from subscription.models import UserSubscription
+        from subscription.models import FleetAccount, UserSubscription
 
-        sub = UserSubscription.objects.filter(user=team.owner).order_by("-created_at").first()
+        sub = UserSubscription.objects.select_related("plan").filter(user=team.owner).order_by("-created_at").first()
+        fleet = FleetAccount.objects.filter(user=team.owner).first()
 
         plan_name = "Team Plan"
         billing_freq = "Monthly"
         renewal_date = None
 
-        if sub:
+        if fleet:
+            plan_name = f"Fleet ({fleet.driver_allowance} Drivers)"
+            billing_freq = (fleet.billing_type or "MONTHLY").title()
+            if fleet.next_payment_date:
+                renewal_date = fleet.next_payment_date.strftime("%B %d, %Y")
+        elif sub:
             if sub.plan:
                 plan_name = sub.plan.name
-            if hasattr(sub, "billing_cycle") and sub.billing_cycle:
-                billing_freq = sub.billing_cycle.capitalize()
-            if hasattr(sub, "end_date") and sub.end_date:
-                renewal_date = sub.end_date.strftime("%B %d, %Y")
+                billing_freq = (sub.plan.billing_type or "MONTHLY").title()
+            if sub.expires_at:
+                renewal_date = sub.expires_at.strftime("%B %d, %Y")
 
         members = TeamMember.objects.filter(team=team)
         enrolled_count = members.filter(status=True).count()

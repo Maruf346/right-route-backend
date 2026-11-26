@@ -40,10 +40,12 @@ class TeamDriverInvitationEmailTests(TestCase):
         self.assertTrue(EmailInvitationLink(invite, "https://team.example.com/enroll/signed-token"))
 
         message = mail.outbox[0]
+        self.assertEqual(message.subject, "Invitation to join the Acme Hauling team on RightRoute app")
         self.assertIn("Hello Jane Driver,", message.body)
         self.assertIn("join the Acme Hauling Team", message.body)
         self.assertIn("https://youtu.be/QVbbLaTovho", message.body)
-        self.assertIn("https://youtu.be/Yqlv0VveXI4", message.body)
+        self.assertIn("https://youtu.be/YqIv0VveXI4", message.body)
+        self.assertIn("https://youtu.be/7IwaA_PQws4", message.body)
         self.assertIn("https://getrightroute.app/Team-Fleet-Driver-User-Guide.pdf", message.body)
         self.assertIn('href="https://apps.apple.com/example"', message.body)
         self.assertIn(

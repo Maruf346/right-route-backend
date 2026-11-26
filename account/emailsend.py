@@ -120,7 +120,7 @@ def EmailInvitationLink(invite, accept_link=None, non_register_user=None):
         or invite.invited_to.email.split("@", 1)[0]
     )
 
-    subject = f"You've Been Invited to Join {invite.team.name} on RightRoute"
+    subject = f"Invitation to join the {invite.team.name} team on RightRoute app"
     context = {
         "team_name": invite.team.name,
         "driver_name": driver_name,
@@ -159,3 +159,77 @@ def EmailInvitationLink(invite, accept_link=None, non_register_user=None):
         raise Exception(
             f"Failed to send invitation: {str(e)}"
         )
+
+
+def EmailSingleSubscriberWelcome(user):
+    """Send welcome email to a single monthly/yearly subscriber upon subscription activation."""
+    email = getattr(user, "email", None)
+    if not email:
+        return False
+
+    subject = "Welcome to RightRoute. Important information enclosed"
+    html_message = render_to_string(
+        "subscription/emails/single_subscriber_welcome.html",
+        {"logo_url": _get_logo_url()},
+    )
+
+    connection, from_email = _get_email_connection_and_sender()
+    email_message = EmailMessage(
+        subject=subject,
+        body=html_message,
+        from_email=from_email,
+        to=[email],
+        connection=connection,
+    )
+    email_message.content_subtype = "html"
+    email_message.send()
+    return True
+
+
+def EmailFleetOwnerWelcome(user, full_name="", password=None, dashboard_url=None):
+    """Send payment confirmation and Team Manager Dashboard credentials to a fleet owner."""
+    email = getattr(user, "email", None)
+    if not email:
+        raise Exception("Fleet owner email is required.")
+
+    cleaned_name = (full_name or "").strip()
+    first_name = cleaned_name.split()[0] if cleaned_name else email.split("@", 1)[0]
+    resolved_dashboard_url = (
+        dashboard_url
+        or getattr(settings, "TEAM_DASHBOARD_URL", None)
+        or getattr(settings, "FRONTEND_URL", None)
+        or "https://team.getrightroute.app"
+    ).rstrip("/")
+
+    subject = "Payment confirmation, your login credentials"
+    html_message = render_to_string(
+        "subscription/emails/fleet_owner_welcome.html",
+        {
+            "first_name": first_name,
+            "login_email": email,
+            "password": password,
+            "dashboard_url": resolved_dashboard_url,
+            "logo_url": _get_logo_url(),
+        },
+    )
+
+    connection, from_email = _get_email_connection_and_sender()
+    email_message = EmailMessage(
+        subject=subject,
+        body=html_message,
+        from_email=from_email,
+        to=[email],
+        connection=connection,
+    )
+    email_message.content_subtype = "html"
+
+    guide_path = Path(settings.BASE_DIR) / "static" / "guides" / "Team-Fleet-User-Guide.pdf"
+    if guide_path.exists():
+        email_message.attach(
+            "Team-Fleet-User-Guide.pdf",
+            guide_path.read_bytes(),
+            "application/pdf",
+        )
+
+    email_message.send()
+    return True

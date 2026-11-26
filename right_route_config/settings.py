@@ -300,9 +300,18 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 SITE_URL = "https://api.getrightroute.app"
 ADMIN_DASHBOARD_URL = "https://admin.getrightroute.app"
-IOS_APP_STORE_URL = "https://getrightroute.app"
-GOOGLE_PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.rightroutes.running"
+IOS_APP_STORE_URL = os.getenv("IOS_APP_STORE_URL", "https://getrightroute.app")
+GOOGLE_PLAY_STORE_URL = os.getenv(
+    "GOOGLE_PLAY_STORE_URL",
+    "https://play.google.com/store/apps/details?id=com.rightroutes.running",
+)
 GOOGLE_MAP_API_KEY = os.getenv("GOOGLE_MAP_API_KEY")
+
+# Stripe Configuration (set real keys in environment variables for production)
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_dummy_replace_with_real_key").strip()
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "pk_test_dummy_replace_with_real_key").strip()
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_dummy_replace_with_real_key").strip()
+TEAM_DASHBOARD_URL = os.getenv("TEAM_DASHBOARD_URL", FRONTEND_URL or "https://team.getrightroute.app").rstrip("/")
 
 
 EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
